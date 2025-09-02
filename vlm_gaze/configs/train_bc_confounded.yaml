@@ -1,0 +1,34 @@
+# Hydra configuration for Behavior Cloning with Confounded Dataset
+# Inherits from train_bc.yaml and overrides specific parameters
+
+defaults:
+  - train_bc
+  - _self_
+
+# Override data configuration for confounded dataset
+data:
+  hdf5_path: "/data3/vla-reasoning/dataset/bench2drive220_robomimic_confounded.hdf5"
+  gaze_key: "gaze_coords_filter_dynamic"
+  num_episodes: 200
+  batch_size: 1000
+  cache_mode: "all"
+  cache_getitem: false
+
+# Override gaze configuration
+gaze:
+  method: "None"
+
+# Override dropout configuration  
+dropout:
+  method: "None"
+
+# Override training configuration
+training:
+  epochs: 500
+  use_amp: true
+  use_compile: true
+
+# Override scheduler configuration
+scheduler:
+  type: "step"
+  step_size: 50

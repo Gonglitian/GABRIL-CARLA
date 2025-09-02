@@ -1,0 +1,21 @@
+dictor
+moviepy
+matplotlib
+numpy==1.24.4
+opencv_python==4.10.0.84
+pexpect
+py_trees==0.8.3
+pyephem
+pygame
+scipy
+Shapely
+simple_watchdog_timer
+six
+# torch==2.5.1
+tqdm
+transforms3d
+tabulate
+carla==0.9.15
+tensorboard
+pytorch-lightning==2.5.2
+einops

@@ -82,7 +82,7 @@ class BaseTrainer:
         self._print_rank0(f"  Number of demos: {dataset.n_demos}")
         self._print_rank0(f"  Cache mode: {self.cfg.data.cache_mode}")
         self._print_rank0(f"  Frame stack: {self.cfg.data.frame_stack}")
-        self._print_rank0(f"  Sequence length: {self.cfg.data.seq_length}")
+        # Sequence length is fixed to 1 in our pipeline; stack is handled explicitly
         self._print_rank0(f"  Gaze key: {getattr(self.cfg.data, 'gaze_key', 'gaze_coords')}")
 
         sampler = None
@@ -190,4 +190,3 @@ class BaseTrainer:
             if (epoch + 1) % self.cfg.training.save_interval == 0 or (epoch + 1) == self.cfg.training.epochs:
                 if self.rank == 0:
                     self.save_for_epoch(epoch + 1)
-

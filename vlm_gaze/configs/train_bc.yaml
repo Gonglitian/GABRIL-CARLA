@@ -12,7 +12,6 @@ data:
   num_workers: 8
   prefetch_factor: 4
   frame_stack: 2  # Number of frames to stack
-  seq_length: 1  # Sequence length for SequenceDataset
   cache_mode: "low_dim"  # HDF5 cache mode: "all", "low_dim", or null
   cache_getitem: false   # When cache_mode=="all", avoid get_item caching to save memory
   img_height: 180
@@ -43,6 +42,9 @@ gaze:
   contrastive_threshold: 10.0  # Threshold for contrastive method
   prob_dist_type: "MSE"  # Probability distribution type: MSE, TV, KL, JS
   ratio: 1.0  # Ratio of episodes to use gaze
+  # Stack-wise causal aggregation (ignore L, aggregate along S with alpha decay)
+  temporal_flag: true
+  temporal_alpha: 0.7
 
 # Dropout configuration
 dropout:

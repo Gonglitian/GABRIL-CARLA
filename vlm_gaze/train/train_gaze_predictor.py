@@ -16,7 +16,7 @@ from einops import rearrange
 # Import using absolute package paths
 from vlm_gaze.data_utils import GazePreprocessor
 from vlm_gaze.models import AutoEncoder, Encoder, Decoder
-from vlm_gaze.train.common.preprocess import format_obs_image, format_gaze_coords
+# Note: image / gaze stack加工逻辑已迁移至 GazePreprocessor
 from vlm_gaze.train.common.base_trainer import BaseTrainer
 
 class GazePredictorTrainer(BaseTrainer):
@@ -77,20 +77,18 @@ class GazePredictorTrainer(BaseTrainer):
 
     def compute_loss(self, batch):
         criterion = nn.MSELoss()
-        obs_image = batch['obs']['image'].to(self.device, non_blocking=True)
+        obs_image_seq = batch['obs']['image'].to(self.device, non_blocking=True)
         gaze_key = getattr(self.cfg.data, 'gaze_key', 'gaze_coords')
-        gaze_coords = batch['obs'][gaze_key].to(self.device, non_blocking=True)
-        obs_image = format_obs_image(obs_image, self.cfg.data.frame_stack, self.cfg.model.grayscale)
-        gaze_coords = format_gaze_coords(gaze_coords)
+        gaze_coords_seq = batch['obs'][gaze_key].to(self.device, non_blocking=True)
+        # 一行：在预处理器中完成图像堆叠与基于 stack 的聚合热图
+        obs_image, gaze_heatmaps, _ = self.gaze_preprocessor.prepare_for_gaze_predictor(
+            obs_image_seq=obs_image_seq,
+            gaze_seq=gaze_coords_seq,
+            frame_stack=self.cfg.data.frame_stack,
+            grayscale=self.cfg.model.grayscale,
+        )
         with torch.no_grad():
-            if gaze_coords.dim() == 2:
-                # 输入为 [B, P]（每样本单步），在 dim=1 处增加时间维 -> [B, 1, P]
-                gaze_coords_for_pre = gaze_coords.unsqueeze(1)
-            else:
-                gaze_coords_for_pre = gaze_coords
-            gaze_heatmaps = self.gaze_preprocessor(gaze_coords_for_pre)
-            if gaze_heatmaps.dim() == 5:
-                gaze_heatmaps = gaze_heatmaps[:, 0]
+            pass  # gaze_heatmaps 已由预处理器生成（[B, 1, H, W]）
         with torch.amp.autocast('cuda', enabled=self.cfg.training.use_amp):
             output = self.model(obs_image)
             loss = criterion(output, gaze_heatmaps)

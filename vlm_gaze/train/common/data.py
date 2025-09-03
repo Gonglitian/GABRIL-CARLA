@@ -38,7 +38,9 @@ def build_dataset(cfg_data):
         action_keys=action_keys,
         action_config=action_config,
         frame_stack=cfg_data.frame_stack,
-        seq_length=cfg_data.seq_length,
+        # 仅依赖 stack 维：将 seq_length 固定为 1，
+        # 使 robomimic 返回长度恰为 S 的时间轴（含前向 pad），后续在训练侧当作 stack 维使用
+        seq_length=1,
         pad_frame_stack=True,
         pad_seq_length=True,
         get_pad_mask=False,

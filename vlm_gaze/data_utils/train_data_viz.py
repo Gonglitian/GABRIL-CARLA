@@ -1,56 +1,9 @@
 #!/usr/bin/env python3
 """
-Visualization utilities for training data in BC trainer
-Generates GIFs showing:
-1. Input images 
-2. Gaze heatmaps
-3. Overlay of images and heatmaps
-
-Basic Usage:
-------------
-# 1. Visualize real gaze data from HDF5 (default - sequential demos)
-python vlm_gaze/data_utils/train_data_viz.py --num_demos 1 --frames_per_demo 300
-
-# 2. Randomly select demos for visualization
-python vlm_gaze/data_utils/train_data_viz.py --random_demos --num_demos 3 --frames_per_demo 20
-
-# 3. Random selection with fixed seed (reproducible)
-python vlm_gaze/data_utils/train_data_viz.py --random_demos --seed 42 --num_demos 5
-
-# 4. Visualize pseudo gaze data
-python vlm_gaze/data_utils/train_data_viz.py --gaze_key gaze_coords_gaze_pseudo --output_dir outputs/viz_pseudo
-
-# 5. Visualize with different gaze sources
-python vlm_gaze/data_utils/train_data_viz.py --gaze_key gaze_coords_filter_dynamic --num_demos 5
-
-# 6. Test with synthetic data (no HDF5 required)
-python vlm_gaze/data_utils/train_data_viz.py --test_synthetic
-
-# 7. Custom HDF5 file path
-python vlm_gaze/data_utils/train_data_viz.py --data_path /path/to/your/data.hdf5 --num_demos 2
-
-Command Line Arguments:
-----------------------
---data_path: Path to HDF5 dataset file (default: /data3/vla-reasoning/dataset/bench2drive220_robomimic.hdf5)
---output_dir: Output directory for GIFs (default: outputs/training_viz_real)
---num_demos: Number of demos to visualize (default: 3)
---frames_per_demo: Number of frames per demo (default: 20)
---gaze_key: Gaze coordinate key to use (default: gaze_coords)
-            Options: gaze_coords, gaze_coords_gaze_pseudo, gaze_coords_filter_dynamic, 
-                    gaze_coords_non_filter, gaze_coords_gaze
---use_pseudo_gaze: Use pseudo gaze (overrides gaze_key to gaze_coords_gaze_pseudo)
---random_demos: Randomly select demos instead of sequential selection
---seed: Random seed for reproducible demo selection (e.g., 42)
---test_synthetic: Test with synthetic data only
-
-Output:
--------
-Generates GIF files in the output directory with three panels:
-- Left: Original input image
-- Middle: Gaze heatmap visualization  
-- Right: Overlay of image and heatmap
-
-Note: Requires vlm-gabril conda environment to be activated
+Training data visualization: directly read one demo from a robomimic HDF5,
+do per-frame temporal aggregation with GazePreprocessor, and export a GIF
+with three panels: image, heatmap, and overlay. Configuration is driven by
+Hydra YAML (configs/train_data_viz.yaml).
 """
 
 import torch
@@ -60,6 +13,150 @@ from typing import Optional, List
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from PIL import Image
+import hydra
+from omegaconf import DictConfig
+import h5py
+
+
+@hydra.main(version_base=None, config_path="../configs", config_name="train_data_viz")
+def main(cfg: DictConfig):
+    """
+    可视化：直接读取 HDF5 的某个 demo，全时序逐帧做时序聚合（GazePreprocessor.forward_temporal），
+    生成包含 Image / Heatmap / Overlay 三列的 GIF。保持 YAML 配置体系；viz.mode 默认 full_demo。
+    """
+    import sys
+    sys.path.append('/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA')
+
+    from vlm_gaze.data_utils import GazePreprocessor
+
+    # Device and config
+    device = str(getattr(cfg.training, 'device', 'cuda:0'))
+    viz_mode = getattr(cfg.viz, 'mode', 'full_demo')
+    assert viz_mode == 'full_demo', "当前脚本仅支持 viz.mode=full_demo，可在 YAML 中设置"
+
+    hdf5_path = getattr(cfg.data, 'hdf5_path', None)
+    if hdf5_path is None:
+        raise ValueError('cfg.data.hdf5_path 未设置')
+    gaze_key = getattr(cfg.data, 'gaze_key', 'gaze_coords')
+
+    # 选择 demo：优先使用 cfg.viz.demo_key，其次使用 cfg.viz.demo_index（默认 0）
+    demo_key_cfg = getattr(cfg.viz, 'demo_key', None)
+    demo_index = int(getattr(cfg.viz, 'demo_index', 0))
+
+    # 初始化凝视预处理器（支持时序聚合）
+    gaze_preprocessor = GazePreprocessor(
+        img_height=int(getattr(cfg.data, 'img_height', 180)),
+        img_width=int(getattr(cfg.data, 'img_width', 320)),
+        gaze_sigma=float(getattr(cfg.gaze, 'mask_sigma', 30.0)),
+        gaze_coeff=float(getattr(cfg.gaze, 'mask_coeff', 0.8)),
+        maxpoints=int(getattr(cfg.gaze, 'max_points', 5)),
+        device=device,
+        temporal_k=int(getattr(cfg.gaze, 'temporal_k', 0)),
+        temporal_alpha=float(getattr(cfg.gaze, 'temporal_alpha', 0.7)),
+        temporal_beta=float(getattr(cfg.gaze, 'temporal_beta', 0.8)),
+        temporal_gamma=float(getattr(cfg.gaze, 'temporal_gamma', 1.0)),
+        temporal_use_future=bool(getattr(cfg.gaze, 'temporal_use_future', True)),
+    )
+
+    # 读取 HDF5 的指定 demo
+    with h5py.File(hdf5_path, 'r') as f:
+        if 'data' not in f:
+            raise KeyError(f"HDF5 缺少 'data' 组: {hdf5_path}")
+        data_grp = f['data']
+        demos = sorted(list(data_grp.keys()))
+        if len(demos) == 0:
+            raise RuntimeError('HDF5 中没有任何 demo')
+
+        if demo_key_cfg is not None and str(demo_key_cfg) != "":
+            # Accept either explicit key or a numeric index (int or numeric string)
+            if isinstance(demo_key_cfg, int) or (isinstance(demo_key_cfg, str) and demo_key_cfg.isdigit()):
+                demo_index = int(demo_key_cfg)
+                demo_index = max(0, min(demo_index, len(demos) - 1))
+                demo_key = demos[demo_index]
+            else:
+                if demo_key_cfg in data_grp:
+                    demo_key = str(demo_key_cfg)
+                else:
+                    # Fallback: try using as index if convertible
+                    try:
+                        demo_index = int(str(demo_key_cfg))
+                        demo_index = max(0, min(demo_index, len(demos) - 1))
+                        demo_key = demos[demo_index]
+                    except Exception:
+                        raise KeyError(f"指定的 demo_key 不存在: {demo_key_cfg}")
+        else:
+            demo_index = max(0, min(int(demo_index), len(demos) - 1))
+            demo_key = demos[demo_index]
+
+        demo = data_grp[demo_key]
+        if 'obs' not in demo:
+            raise KeyError(f"demo 缺少 'obs' 组: {demo_key}")
+        obs = demo['obs']
+
+        # 图像与凝视数据
+        if 'image' not in obs:
+            raise KeyError(f"obs 中缺少 'image': {demo_key}")
+        if gaze_key not in obs:
+            raise KeyError(f"obs 中缺少 '{gaze_key}': {demo_key}")
+
+        # numpy arrays
+        imgs_np = np.array(obs['image'])              # [T, H, W, C]
+        gaze_np = np.array(obs[gaze_key])             # [T, P*2] 或 [T, P, 2]
+
+    T = int(imgs_np.shape[0])
+    frames_img: List[torch.Tensor] = []   # each [C,H,W]
+    frames_hm: List[torch.Tensor] = []    # each [1,H,W]
+
+    # 组装全时序 gaze 到张量，置到 device
+    gzs_torch = torch.from_numpy(gaze_np)
+    if gzs_torch.dim() == 2:
+        gzs_torch = gzs_torch.unsqueeze(0)  # [1, T, P*2]
+    gzs_torch = gzs_torch.to(device)
+
+    with torch.no_grad():
+        for t in range(T):
+            # 图像处理 -> [C,H,W], 归一化到 [0,1]
+            img_t = torch.from_numpy(imgs_np[t]).float()
+            if img_t.max() > 1.0:
+                img_t = img_t / 255.0
+            if img_t.dim() == 2:
+                img_t = img_t.unsqueeze(0)  # [1,H,W]
+            elif img_t.dim() == 3:
+                img_t = img_t.permute(2, 0, 1)  # [C,H,W]
+            else:
+                raise ValueError(f"Unexpected image shape at t={t}: {img_t.shape}")
+            if getattr(cfg.model, 'grayscale', False) and img_t.shape[0] == 3:
+                r, gch, b = img_t[0:1], img_t[1:2], img_t[2:3]
+                img_t = 0.299 * r + 0.587 * gch + 0.114 * b
+            frames_img.append(img_t.cpu())
+
+            # 时序聚合：使用 GazePreprocessor.forward_temporal
+            hm_t = gaze_preprocessor.forward_temporal(gzs_torch, center_index=t)  # [1,1,H,W]
+            hm_t = hm_t[0]  # [1,H,W]
+            frames_hm.append(hm_t.detach().cpu())
+
+    # 堆叠为可视化批次形状
+    obs_vis = torch.stack(frames_img, dim=0).unsqueeze(0)  # [1,T,C,H,W]
+    hm_vis = torch.stack(frames_hm, dim=0).unsqueeze(0)    # [1,T,1,H,W]
+
+    # 可视化配置与导出 GIF
+    visualizer = TrainingDataVisualizer(
+        output_dir=getattr(cfg.logging, 'viz_dir', 'outputs/training_viz'),
+        max_frames=getattr(cfg.viz, 'max_frames', 999),
+        fps=getattr(cfg.viz, 'fps', 20),
+        overlay_alpha=getattr(cfg.viz, 'alpha', 0.5),
+    )
+
+    visualizer.visualize_batch(
+        obs_vis,
+        hm_vis,
+        batch_idx=demo_index if demo_key_cfg is None else 0,
+        epoch=0,
+        save_individual=False,
+    )
+
+    print("Done. Visualization saved.")
+
 import io
 
 
@@ -637,40 +734,5 @@ def test_with_synthetic_data():
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Visualize training data with gaze heatmaps")
-    parser.add_argument('--data_path', type=str, default="/data3/vla-reasoning/dataset/bench2drive220_robomimic.hdf5",
-                        help="Path to the HDF5 dataset file")
-    parser.add_argument('--output_dir', type=str, default="outputs/training_viz_real",
-                        help="Output directory for visualizations")
-    parser.add_argument('--num_demos', type=int, default=3,
-                        help="Number of demos to visualize")
-    parser.add_argument('--frames_per_demo', type=int, default=20,
-                        help="Number of frames to visualize per demo")
-    parser.add_argument('--use_pseudo_gaze', action='store_true',
-                        help="Use pseudo gaze coordinates instead of real gaze")
-    parser.add_argument('--gaze_key', type=str, default="gaze_coords",
-                        help="Which gaze key to use (gaze_coords, gaze_coords_gaze_pseudo, etc.)")
-    parser.add_argument('--random_demos', action='store_true',
-                        help="Randomly select demos instead of sequential selection")
-    parser.add_argument('--seed', type=int, default=None,
-                        help="Random seed for reproducible demo selection")
-    parser.add_argument('--test_synthetic', action='store_true',
-                        help="Test with synthetic data only")
-    
-    args = parser.parse_args()
-    
-    if args.test_synthetic:
-        test_with_synthetic_data()
-    else:
-        visualize_from_training_data(
-            data_path=args.data_path,
-            output_dir=args.output_dir,
-            num_demos=args.num_demos,
-            frames_per_demo=args.frames_per_demo,
-            use_pseudo_gaze=args.use_pseudo_gaze,
-            gaze_key=args.gaze_key,
-            random_demos=args.random_demos,
-            seed=args.seed
-        )
+    # Prefer Hydra-based visualization using dataloader and config
+    main()

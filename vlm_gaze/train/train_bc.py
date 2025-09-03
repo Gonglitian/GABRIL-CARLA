@@ -13,7 +13,6 @@ from omegaconf import DictConfig, OmegaConf
 from vlm_gaze.data_utils import GazePreprocessor
 from vlm_gaze.data_utils.gaze_utils import get_gaze_mask, apply_gmd_dropout
 from vlm_gaze.models import Encoder, VectorQuantizer, weight_init
-from vlm_gaze.train.common.preprocess import format_obs_image, format_gaze_coords
 from vlm_gaze.train.common.base_trainer import BaseTrainer
 from vlm_gaze.train.common.distributed import wrap_ddp, destroy_distributed_if_initialized
 
@@ -31,7 +30,12 @@ class BCTrainer(BaseTrainer):
             gaze_sigma=self.cfg.gaze.mask_sigma,
             gaze_coeff=self.cfg.gaze.mask_coeff,
             maxpoints=self.cfg.gaze.max_points,
-            device=str(self.device)
+            device=str(self.device),
+            temporal_k=int(getattr(self.cfg.gaze, 'temporal_k', 0)),
+            temporal_alpha=float(getattr(self.cfg.gaze, 'temporal_alpha', 0.7)),
+            temporal_beta=float(getattr(self.cfg.gaze, 'temporal_beta', 0.8)),
+            temporal_gamma=float(getattr(self.cfg.gaze, 'temporal_gamma', 1.0)),
+            temporal_use_future=bool(getattr(self.cfg.gaze, 'temporal_use_future', True)),
         )
         self.criterion = nn.MSELoss()
 
@@ -192,30 +196,38 @@ class BCTrainer(BaseTrainer):
             self.gril_gaze_coord_predictor.train()
 
     def compute_loss(self, batch):
-        obs_image = batch['obs']['image'].to(self.device, non_blocking=True)
+        obs_image_seq = batch['obs']['image'].to(self.device, non_blocking=True)
         gaze_key = getattr(self.cfg.data, 'gaze_key', 'gaze_coords')
-        gaze_coords = batch['obs'][gaze_key].to(self.device, non_blocking=True)
+        gaze_coords_raw = batch['obs'][gaze_key].to(self.device, non_blocking=True)
         actions = batch['actions'].to(self.device, non_blocking=True)
-        obs_image = format_obs_image(obs_image, self.cfg.data.frame_stack, self.cfg.model.grayscale)
-        gaze_coords = format_gaze_coords(gaze_coords)
-        # 如果 actions 带有时间或堆叠维度（[B, T, A] 或 [B, S, A]），取最后一步对齐网络输出形状 [B, A]
+
+        # 一行：在预处理器内完成图像堆叠；根据 yaml 中 gaze.temporal_flag 决定是否对 stack 维做因果聚合
+        do_agg = bool(getattr(self.cfg.gaze, 'temporal_flag', True))
+        obs_image, gaze_heatmaps, center_idx = self.gaze_preprocessor.prepare_for_bc(
+            obs_image_seq=obs_image_seq,
+            gaze_seq=gaze_coords_raw,
+            frame_stack=self.cfg.data.frame_stack,
+            grayscale=self.cfg.model.grayscale,
+            aggregate_stack=do_agg,
+        )
+        # 动作与中心时刻对齐
         if actions.dim() == 3:
-            actions = actions[:, -1, :]
+            # 若 actions 有时间维，按 center_idx 对齐；否则退化到最后一步
+            if center_idx < actions.shape[1]:
+                actions = actions[:, center_idx, :]
+            else:
+                actions = actions[:, -1, :]
         batch_size = obs_image.shape[0]
         with torch.no_grad():
-            if gaze_coords.dim() == 2:
-                # 输入为 [B, P]（每样本单步），在 dim=1 处增加时间维 -> [B, 1, P]
-                gaze_coords_for_preprocessor = gaze_coords.unsqueeze(1)
-            else:
-                gaze_coords_for_preprocessor = gaze_coords
-            gaze_heatmaps = self.gaze_preprocessor(gaze_coords_for_preprocessor)
-            if gaze_heatmaps.dim() == 5:
-                gaze_heatmaps = gaze_heatmaps[:, 0]
-            if self.cfg.data.frame_stack > 1:
-                gaze_heatmaps = repeat(gaze_heatmaps, 'b 1 h w -> b s h w', s=self.cfg.data.frame_stack)
+            pass  # gaze_heatmaps 已由预处理器生成
         ivg = torch.ones(batch_size, dtype=torch.float32, device=self.device)
         with torch.amp.autocast('cuda', enabled=self.cfg.training.use_amp):
-            xx = obs_image; gg = gaze_heatmaps; gc = gaze_coords
+            xx = obs_image; gg = gaze_heatmaps
+            # For GRIL, use coordinates at center timestep if sequence provided
+            if gaze_coords_raw.dim() >= 3:
+                gc = gaze_coords_raw[:, center_idx]
+            else:
+                gc = gaze_coords_raw
             gaze_dropout_mask = gg if self.cfg.dropout.method == 'IGMD' else None
             z = self.encoder(xx if self.cfg.gaze.method != 'Mask' else xx * gg, dropout_mask=gaze_dropout_mask)
             if self.cfg.gaze.method == 'ViSaRL':

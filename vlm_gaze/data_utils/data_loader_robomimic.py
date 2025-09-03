@@ -38,7 +38,13 @@ class GazePreprocessor(nn.Module):
         gaze_sigma: float = 30.0,
         gaze_coeff: float = 0.8,
         maxpoints: int = 5,
-        device: str = 'cuda'
+        device: str = 'cuda',
+        # Temporal accumulation hyperparameters (for multimodal Gaussian over time)
+        temporal_k: int = 0,
+        temporal_alpha: float = 0.7,
+        temporal_beta: float = 0.8,
+        temporal_gamma: float = 1.0,
+        temporal_use_future: bool = True,
     ):
         super().__init__()
         self.img_height = img_height
@@ -47,6 +53,12 @@ class GazePreprocessor(nn.Module):
         self.gaze_sigma = gaze_sigma
         self.gaze_coeff = gaze_coeff
         self.device = device
+        # Temporal hyperparameters
+        self.temporal_k = int(max(0, temporal_k))
+        self.temporal_alpha = float(temporal_alpha)
+        self.temporal_beta = float(temporal_beta)
+        self.temporal_gamma = float(temporal_gamma)
+        self.temporal_use_future = bool(temporal_use_future)
         
         # Pre-compute Gaussian kernel
         kernel_size = int(4 * gaze_sigma + 1)
@@ -89,11 +101,8 @@ class GazePreprocessor(nn.Module):
         x_coords = (gaze_coords[..., 0].clamp(0, 1) * (W - 1)).long().clamp(0, W - 1)
         y_coords = (gaze_coords[..., 1].clamp(0, 1) * (H - 1)).long().clamp(0, H - 1)
 
-        # Exponential decay weights per valid order within each (B,T)
-        # rank = cumsum(valid_mask) - 1 over P, only for valid entries
-        rank = torch.cumsum(valid_mask.to(torch.int64), dim=2) - 1  # [B, T, P]
-        rank = rank.clamp(min=0).to(torch.float32)
-        weights = torch.pow(torch.tensor(self.gaze_coeff, device=device, dtype=torch.float32), rank) * valid_mask.float()
+        # Uniform weights per valid gaze point within each (B, T), independent of gaze_coeff
+        weights = valid_mask.float()
 
         # Build delta maps for all (B,T) at once via scatter_add
         num_samples = B * T
@@ -112,12 +121,272 @@ class GazePreprocessor(nn.Module):
         blurred = F.conv2d(delta_bt, kernel, padding=(0, padding))
         kernel_t = rearrange(kernel, 'a b h w -> a b w h')
         blurred = F.conv2d(blurred, kernel_t, padding=(padding, 0))
-        # Normalize each heatmap
+        # Normalize each heatmap to [0, 1] via min-max
+        min_vals = blurred.amin(dim=(2, 3), keepdim=True)
         max_vals = blurred.amax(dim=(2, 3), keepdim=True)
-        normalized = blurred / (max_vals + 1e-8)
+        normalized = (blurred - min_vals) / (max_vals - min_vals + 1e-8)
         heatmaps = rearrange(normalized, '(b t) c h w -> b t c h w', b=B, t=T)
 
         return heatmaps
+
+    def forward_temporal(self, gaze_coords: torch.Tensor, center_index: int = -1) -> torch.Tensor:
+        """
+        Build a single aggregated gaze heatmap for the center frame by accumulating
+        gaze samples from past and (optionally) future frames with decayed intensity
+        and expanded Gaussian radius, as described in the paper.
+
+        Args:
+            gaze_coords: [B, T, maxpoints*2] or [B, T, maxpoints, 2]
+            center_index: which timestep to center on (default: last, i.e., -1)
+
+        Returns:
+            aggregated_heatmap: [B, 1, H, W]
+        """
+        # Early exit if no temporal accumulation requested
+        if self.temporal_k <= 0:
+            # Fall back to non-temporal path and pick the requested center frame
+            heatmaps_t = self.forward(gaze_coords)  # [B, T, 1, H, W]
+            B, T = heatmaps_t.shape[:2]
+            cidx = (T - 1) if center_index < 0 else int(min(max(center_index, 0), T - 1))
+            return heatmaps_t[:, cidx]
+
+        # Normalize input shape
+        if gaze_coords.dim() == 3 and gaze_coords.shape[-1] == self.maxpoints * 2:
+            gaze_coords = rearrange(gaze_coords, 'b t (p c) -> b t p c', p=self.maxpoints, c=2)
+        elif gaze_coords.dim() == 2:
+            gaze_coords = rearrange(gaze_coords, 't (p c) -> 1 t p c', p=self.maxpoints, c=2)
+
+        B, T, P, _ = gaze_coords.shape
+        H, W = self.img_height, self.img_width
+        device = gaze_coords.device
+        cidx = (T - 1) if center_index < 0 else int(min(max(center_index, 0), T - 1))
+
+        # Valid points mask per (b, t, p)
+        valid_mask = (gaze_coords[..., 0] >= 0) & (gaze_coords[..., 1] >= 0)
+
+        # Pixel indices
+        x_coords = (gaze_coords[..., 0].clamp(0, 1) * (W - 1)).long().clamp(0, W - 1)
+        y_coords = (gaze_coords[..., 1].clamp(0, 1) * (H - 1)).long().clamp(0, H - 1)
+
+        # Per-sample rank along P within each (b, t) for amplitude decay among multiple points
+        rank = torch.cumsum(valid_mask.to(torch.int64), dim=2) - 1
+        rank = rank.clamp(min=0).to(torch.float32)
+        weights_p = torch.pow(torch.tensor(self.gaze_coeff, device=device, dtype=torch.float32), rank) * valid_mask.float()
+
+        # Build delta maps [B, T, 1, H, W]
+        num_samples = B * T
+        delta = torch.zeros(num_samples, H * W, device=device, dtype=torch.float32)
+        lin_idx = rearrange(y_coords * W + x_coords, 'b t p -> (b t) p')
+        w_flat = rearrange(weights_p, 'b t p -> (b t) p')
+        delta.scatter_add_(dim=1, index=lin_idx, src=w_flat)
+        delta = rearrange(delta, '(b t) (h w) -> b t 1 h w', b=B, t=T, h=H, w=W)
+
+        # Accumulate over feasible temporal offsets around center frame
+        max_past = min(self.temporal_k, cidx)
+        max_future = min(self.temporal_k, T - 1 - cidx) if self.temporal_use_future else 0
+        agg = torch.zeros(B, 1, H, W, device=device, dtype=torch.float32)
+        for j in range(-max_past, max_future + 1):
+            if j == 0:
+                include = True
+            else:
+                include = True if (self.temporal_use_future or j <= 0) else False
+            if not include:
+                continue
+
+            idx = int(min(max(cidx + j, 0), T - 1))
+            delta_j = delta[:, idx]  # [B, 1, H, W]
+
+            # Sigma expansion over time: sigma_j = gaze_sigma * (gamma * beta^{-abs(j)})
+            sigma_j = float(self.gaze_sigma * (self.temporal_gamma * (self.temporal_beta ** (-abs(j)))))
+            sigma_j = max(1e-3, sigma_j)
+            ksize = int(4 * sigma_j + 1)
+            if ksize % 2 == 0:
+                ksize += 1
+            x = torch.arange(ksize, device=device, dtype=torch.float32) - ksize // 2
+            k1d = torch.exp(-x ** 2 / (2 * sigma_j ** 2))
+            k1d = k1d / (k1d.sum() + 1e-8)
+            padding = ksize // 2
+            # Separable blur (horizontal then vertical) with proper padding per dimension
+            kh = rearrange(k1d, 'l -> 1 1 1 l')  # horizontal kernel 1xL
+            kv = rearrange(k1d, 'l -> 1 1 l 1')  # vertical kernel Lx1
+
+            # First: horizontal pass (pad width)
+            blurred = F.conv2d(delta_j, kh, padding=(0, padding))
+            # Second: vertical pass (pad height)
+            blurred = F.conv2d(blurred, kv, padding=(padding, 0))
+
+            # Amplitude decay over temporal distance: alpha^{|j|}
+            amp = float(self.temporal_alpha ** abs(j))
+            agg = agg + amp * blurred
+
+        # Normalize to [0, 1] via min-max
+        min_vals = agg.amin(dim=(2, 3), keepdim=True)
+        max_vals = agg.amax(dim=(2, 3), keepdim=True)
+        agg = (agg - min_vals) / (max_vals - min_vals + 1e-8)
+        return agg
+
+    # ---------------------------------------------------------------------
+    # Stack-aware helpers and unified APIs for training scripts
+    # ---------------------------------------------------------------------
+    @staticmethod
+    def _gather_last_s_frames(seq: torch.Tensor, center_idx: int, stack_len: int) -> torch.Tensor:
+        """
+        Generic utility: from [B, L, ...] gather a window [B, S, ...] that ends at center_idx.
+        Pads by clamping at boundaries to preserve length S.
+        """
+        assert seq.dim() >= 2, f"Expected [B, L, ...], got {seq.shape}"
+        B, L = seq.shape[0], seq.shape[1]
+        start = center_idx - (stack_len - 1)
+        idxs = [min(max(i, 0), L - 1) for i in range(start, center_idx + 1)]
+        while len(idxs) < stack_len:
+            idxs.insert(0, idxs[0])
+        index_tensor = torch.tensor(idxs, device=seq.device, dtype=torch.long)
+        return seq.index_select(dim=1, index=index_tensor)
+
+    @staticmethod
+    def extract_image_stack_around_center(images_seq: torch.Tensor, center_idx: int, frame_stack: int) -> torch.Tensor:
+        """
+        From [B, L, H, W, C], build [B, S, H, W, C] ending at center_idx.
+        If input is already [B, H, W, C], return as-is.
+        """
+        if images_seq.dim() != 5:
+            return images_seq
+        return GazePreprocessor._gather_last_s_frames(images_seq, center_idx=center_idx, stack_len=frame_stack)
+
+    @staticmethod
+    def extract_gaze_stack_around_center(gaze_seq: torch.Tensor, center_idx: int, frame_stack: int) -> torch.Tensor:
+        """
+        From [B, L, P*2] or [B, L, P, 2], build [B, S, P*2] or [B, S, P, 2].
+        If input has no time dimension, return as-is.
+        """
+        if gaze_seq.dim() < 3:
+            return gaze_seq
+        return GazePreprocessor._gather_last_s_frames(gaze_seq, center_idx=center_idx, stack_len=frame_stack)
+
+    @staticmethod
+    def _format_obs_image(images: torch.Tensor, frame_stack: int, grayscale: bool) -> torch.Tensor:
+        """
+        Format images for encoder input. Accepts [B, S, H, W, C] or [B, H, W, C].
+        Returns channels-first tensor [B, C_img, H, W] where C_img = S * (1 or 3).
+        """
+        from einops import rearrange as _rearr
+        if images.dtype == torch.uint8:
+            images = images.float() / 255.0
+        # [B, S, H, W, C]
+        if images.dim() == 5 and images.shape[1] == frame_stack:
+            B, S, H, W, C = images.shape
+            x = _rearr(images, 'b s h w c -> b s c h w')
+            if grayscale and C == 3:
+                x = 0.299 * x[:, :, 0:1] + 0.587 * x[:, :, 1:2] + 0.114 * x[:, :, 2:3]
+            x = _rearr(x, 'b s c h w -> b (s c) h w')
+            return x
+        # [B, H, W, C]
+        if images.dim() == 4 and images.shape[-1] in [1, 3]:
+            x = _rearr(images, 'b h w c -> b c h w')
+            if grayscale and x.shape[1] == 3:
+                x = 0.299 * x[:, 0:1] + 0.587 * x[:, 1:2] + 0.114 * x[:, 2:3]
+            return x
+        return images
+
+    def build_stack_heatmaps(self, gaze_seq: torch.Tensor, frame_stack: int, center_idx: int) -> torch.Tensor:
+        """
+        Build per-stack heatmaps with causal aggregation along stack S.
+
+        Args:
+            gaze_seq: [B, L, P*2] or [B, L, P, 2]
+            frame_stack: S
+            center_idx: center time to end the stack window on
+
+        Returns:
+            heatmaps_stack: [B, S, H, W] in [0,1]
+        """
+        # 1) Extract [B, S, ...]
+        gaze_stack = self.extract_gaze_stack_around_center(gaze_seq, center_idx=center_idx, frame_stack=frame_stack)
+        # 2) Base heatmaps per stack step -> [B, S, 1, H, W]
+        base_stack_heat = self.forward(gaze_stack)
+        if base_stack_heat.dim() != 5:
+            # Expand if needed for robustness
+            base_stack_heat = base_stack_heat.unsqueeze(1)
+        # 3) Causal aggregation along S with alpha decay
+        alpha = float(self.temporal_alpha)
+        B, S = base_stack_heat.shape[0], base_stack_heat.shape[1]
+        agg_stack = torch.zeros_like(base_stack_heat)
+        for s in range(S):
+            if s == 0:
+                agg_stack[:, s] = base_stack_heat[:, s]
+            else:
+                # coeffs: [s+1], alpha^(s-j)
+                coeffs = torch.tensor([alpha ** (s - j) for j in range(s + 1)], device=base_stack_heat.device, dtype=base_stack_heat.dtype)
+                coeffs = coeffs.view(1, s + 1, 1, 1, 1)
+                agg_stack[:, s] = (base_stack_heat[:, :s+1] * coeffs).sum(dim=1)
+        # 4) Normalize to [0,1]
+        amin = agg_stack.amin(dim=(-2, -1), keepdim=True)
+        amax = agg_stack.amax(dim=(-2, -1), keepdim=True)
+        agg_stack = (agg_stack - amin) / (amax - amin + 1e-8)
+        return agg_stack.squeeze(2)  # [B, S, H, W]
+
+    def prepare_for_bc(self,
+                       obs_image_seq: torch.Tensor,
+                       gaze_seq: torch.Tensor,
+                       frame_stack: int,
+                       grayscale: bool = False,
+                       aggregate_stack: bool = True):
+        """
+        One-call API for BC training to get encoder-ready images and stack-aggregated gaze heatmaps.
+
+        Args:
+            obs_image_seq: [B, L, H, W, C]
+            gaze_seq: [B, L, P*2] or [B, L, P, 2]
+            frame_stack: S
+            seq_length: configured sequence length L (used to pick center)
+            grayscale: whether to convert RGB to 1-channel
+
+        Returns:
+            obs_image: [B, S*C', H, W]
+            gaze_heatmaps: [B, S, H, W]
+            center_idx: int
+        """
+        # Determine center index: use last available step (ignore external seq_length)
+        center_idx = (obs_image_seq.shape[1] - 1) if obs_image_seq.dim() > 1 else 0
+
+        # Build image stack window and format to channels-first
+        imgs_stack = self.extract_image_stack_around_center(obs_image_seq, center_idx=center_idx, frame_stack=frame_stack)
+        obs_image = self._format_obs_image(imgs_stack, frame_stack=frame_stack, grayscale=grayscale)
+
+        # Build gaze heatmaps along stack
+        if aggregate_stack:
+            gaze_heatmaps = self.build_stack_heatmaps(gaze_seq, frame_stack=frame_stack, center_idx=center_idx)
+        else:
+            # Base per-stack heatmaps without causal aggregation
+            gaze_stack = self.extract_gaze_stack_around_center(gaze_seq, center_idx=center_idx, frame_stack=frame_stack)
+            base_stack = self.forward(gaze_stack)  # [B, S, 1, H, W]
+            if base_stack.dim() == 5:
+                gaze_heatmaps = base_stack.squeeze(2)  # [B, S, H, W]
+            else:
+                # Robustness: if [B,1,H,W], tile to S then squeeze
+                gaze_heatmaps = base_stack
+                if gaze_heatmaps.dim() == 4 and gaze_heatmaps.shape[1] == 1 and frame_stack > 1:
+                    gaze_heatmaps = gaze_heatmaps.repeat(1, frame_stack, 1, 1)
+        return obs_image, gaze_heatmaps, center_idx
+
+    def prepare_for_gaze_predictor(self,
+                                   obs_image_seq: torch.Tensor,
+                                   gaze_seq: torch.Tensor,
+                                   frame_stack: int,
+                                   grayscale: bool = False):
+        """
+        One-call API for gaze predictor training.
+        Builds an image stack [B, S, H, W, C] and aggregates gaze along stack to [B, 1, H, W]
+        using forward_temporal centered at the last stack frame.
+        """
+        center_idx = (obs_image_seq.shape[1] - 1) if obs_image_seq.dim() > 1 else 0
+        imgs_stack = self.extract_image_stack_around_center(obs_image_seq, center_idx=center_idx, frame_stack=frame_stack)
+        obs_image = self._format_obs_image(imgs_stack, frame_stack=frame_stack, grayscale=grayscale)
+
+        # Extract gaze stack and apply causal aggregation along stack to the last step only
+        gaze_stack_agg = self.build_stack_heatmaps(gaze_seq, frame_stack=frame_stack, center_idx=center_idx)  # [B,S,H,W]
+        last = gaze_stack_agg[:, -1]  # [B,H,W]
+        return obs_image, last.unsqueeze(1), center_idx  # [B,1,H,W]
 
 
 # ============================================================================

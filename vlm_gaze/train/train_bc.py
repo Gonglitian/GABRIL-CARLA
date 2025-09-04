@@ -35,7 +35,11 @@ class BCTrainer(BaseTrainer):
             temporal_alpha=float(getattr(self.cfg.gaze, 'temporal_alpha', 0.7)),
             temporal_beta=float(getattr(self.cfg.gaze, 'temporal_beta', 0.8)),
             temporal_gamma=float(getattr(self.cfg.gaze, 'temporal_gamma', 1.0)),
-            temporal_use_future=bool(getattr(self.cfg.gaze, 'temporal_use_future', True)),
+            temporal_use_future=bool(getattr(self.cfg.gaze, 'temporal_use_future', False)),
+            temporal_mode=str(getattr(self.cfg.gaze, 'temporal_mode', 'alpha_decay')),
+            temporal_sigmas=getattr(self.cfg.gaze, 'temporal_sigmas', None),
+            temporal_coeffs=getattr(self.cfg.gaze, 'temporal_coeffs', None),
+            temporal_offset_start=int(getattr(self.cfg.gaze, 'temporal_offset_start', 0)),
         )
         self.criterion = nn.MSELoss()
 

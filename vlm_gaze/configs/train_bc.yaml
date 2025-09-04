@@ -45,6 +45,13 @@ gaze:
   # Stack-wise causal aggregation (ignore L, aggregate along S with alpha decay)
   temporal_flag: true
   temporal_alpha: 0.7
+  # Causal multiscale aggregation (optional). If temporal_mode=='multiscale' and lists are set,
+  # use per-step sigmas / coeffs to aggregate only from past frames.
+  temporal_mode: "alpha_decay"   # options: alpha_decay, multiscale
+  temporal_sigmas: null           # e.g., [30.0, 24.0, 18.0, 12.0]
+  temporal_coeffs: null           # e.g., [1.0, 0.8, 0.6, 0.4]
+  temporal_offset_start: 0        # index offset into the lists
+  temporal_use_future: false      # keep causality: only aggregate past frames
 
 # Dropout configuration
 dropout:
@@ -79,10 +86,10 @@ scheduler:
 # Training configuration
 training:
   seed: 42
-  epochs: 100
+  epochs: 500
   device: "cuda:0"
   use_amp: true  # Use automatic mixed precision
-  use_compile: false  # Use torch.compile (requires PyTorch 2.0+)
+  use_compile: true  # Use torch.compile (requires PyTorch 2.0+)
   compile_backend: "inductor"  # torch.compile backend: inductor, aot_eager, etc.
   compile_mode: "default"      # torch.compile mode: default, reduce-overhead, max-autotune
   gradient_accumulation_steps: 1

@@ -21,7 +21,7 @@ import h5py
 @hydra.main(version_base=None, config_path="../configs", config_name="train_data_viz")
 def main(cfg: DictConfig):
     """
-    可视化：直接读取 HDF5 的某个 demo，全时序逐帧做时序聚合（GazePreprocessor.forward_temporal），
+    可视化：直接读取 HDF5 的某个 demo，全时序逐帧做因果聚合（基于栈窗口的 build_stack_heatmaps），
     生成包含 Image / Heatmap / Overlay 三列的 GIF。保持 YAML 配置体系；viz.mode 默认 full_demo。
     """
     import sys
@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
     demo_key_cfg = getattr(cfg.viz, 'demo_key', None)
     demo_index = int(getattr(cfg.viz, 'demo_index', 0))
 
-    # 初始化凝视预处理器（支持时序聚合）
+    # 初始化凝视预处理器（用于生成基础热图与stack聚合）
     gaze_preprocessor = GazePreprocessor(
         img_height=int(getattr(cfg.data, 'img_height', 180)),
         img_width=int(getattr(cfg.data, 'img_width', 320)),
@@ -51,11 +51,15 @@ def main(cfg: DictConfig):
         gaze_coeff=float(getattr(cfg.gaze, 'mask_coeff', 0.8)),
         maxpoints=int(getattr(cfg.gaze, 'max_points', 5)),
         device=device,
-        temporal_k=int(getattr(cfg.gaze, 'temporal_k', 0)),
+        temporal_k=0,  # 不使用 L/T 维
         temporal_alpha=float(getattr(cfg.gaze, 'temporal_alpha', 0.7)),
-        temporal_beta=float(getattr(cfg.gaze, 'temporal_beta', 0.8)),
-        temporal_gamma=float(getattr(cfg.gaze, 'temporal_gamma', 1.0)),
-        temporal_use_future=bool(getattr(cfg.gaze, 'temporal_use_future', True)),
+        temporal_beta=1.0,
+        temporal_gamma=1.0,
+        temporal_use_future=bool(getattr(cfg.gaze, 'temporal_use_future', False)),
+        temporal_mode=str(getattr(cfg.gaze, 'temporal_mode', 'alpha_decay')),
+        temporal_sigmas=getattr(cfg.gaze, 'temporal_sigmas', None),
+        temporal_coeffs=getattr(cfg.gaze, 'temporal_coeffs', None),
+        temporal_offset_start=int(getattr(cfg.gaze, 'temporal_offset_start', 0)),
     )
 
     # 读取 HDF5 的指定 demo
@@ -113,6 +117,7 @@ def main(cfg: DictConfig):
         gzs_torch = gzs_torch.unsqueeze(0)  # [1, T, P*2]
     gzs_torch = gzs_torch.to(device)
 
+    stack_window = int(getattr(cfg.viz, 'stack_window', max(1, int(getattr(cfg.data, 'frame_stack', 2)))))
     with torch.no_grad():
         for t in range(T):
             # 图像处理 -> [C,H,W], 归一化到 [0,1]
@@ -130,9 +135,12 @@ def main(cfg: DictConfig):
                 img_t = 0.299 * r + 0.587 * gch + 0.114 * b
             frames_img.append(img_t.cpu())
 
-            # 时序聚合：使用 GazePreprocessor.forward_temporal
-            hm_t = gaze_preprocessor.forward_temporal(gzs_torch, center_index=t)  # [1,1,H,W]
-            hm_t = hm_t[0]  # [1,H,W]
+            # 基于 stack 窗口的因果聚合：取中心 t，窗口大小 S
+            # 返回 [1, S, H, W]，每个 s 都是因果聚合后的热图；取最后一帧作为 t 时刻的聚合热图
+            hm_stack = gaze_preprocessor.build_stack_heatmaps(
+                gzs_torch, frame_stack=stack_window, center_idx=t
+            )  # [1, S, H, W]
+            hm_t = hm_stack[:, -1]  # [1, H, W]
             frames_hm.append(hm_t.detach().cpu())
 
     # 堆叠为可视化批次形状
@@ -611,8 +619,8 @@ def visualize_from_training_data(
                 frames_to_viz = min(frames_per_demo, max_frame_pairs)
                 
                 # Create batch of frames for visualization
-                batch_images = []
-                batch_gazes = []
+                batch_images = []            # [B, 2, H, W, C]
+                batch_gazes_seq = []         # [B, 2, 10] (two-frame gaze coords per pair)
                 
                 # Collect frame pairs for visualization
                 for pair_idx in range(frames_to_viz):
@@ -626,39 +634,36 @@ def visualize_from_training_data(
                         image_data[frame_idx + 1]
                     ], axis=0)  # [2, H, W, C]
                     
-                    # Get gaze for current frame (we use the second frame's gaze)
-                    current_gaze = gaze_data[frame_idx + 1]  # [10]
-                    
+                    # Stack corresponding gaze coords for the two frames in the pair
+                    stacked_gaze = np.stack([
+                        gaze_data[frame_idx],      # previous frame gaze
+                        gaze_data[frame_idx + 1]   # current frame gaze
+                    ], axis=0)  # [2, 10]
+
                     batch_images.append(stacked_image)
-                    batch_gazes.append(current_gaze)
+                    batch_gazes_seq.append(stacked_gaze)
                 
                 if len(batch_images) == 0:
                     print(f"No frames to process for {demo_key}")
                     continue
                 
                 # Convert to tensors
-                batch_images = torch.from_numpy(np.array(batch_images))  # [B, 2, H, W, C]
-                batch_gazes = torch.from_numpy(np.array(batch_gazes))  # [B, 10]
-                
-                # Format images for model input
+                batch_images = torch.from_numpy(np.array(batch_images))      # [B, 2, H, W, C]
+                batch_gazes_seq = torch.from_numpy(np.array(batch_gazes_seq))  # [B, 2, 10]
+
+                # Format images for model input (stack=2)
                 batch_images = format_obs_image(batch_images, frame_stack=2, grayscale=False)
-                
-                # Reshape gaze coords from [B, 10] to [B, 5, 2]
-                batch_gazes = rearrange(batch_gazes, 'b (p c) -> b p c', p=5, c=2)
-                
-                # Generate gaze heatmaps
+
+                # Reshape gaze coords [B, 2, 10] -> [B, 2, 5, 2]
+                batch_gazes_seq = rearrange(batch_gazes_seq, 'b s (p c) -> b s p c', p=5, c=2)
+
+                # Generate gaze heatmaps with causal aggregation over the pair (center at last frame)
                 with torch.no_grad():
-                    # Add time dimension for preprocessor
-                    batch_gazes_for_proc = batch_gazes.unsqueeze(1)  # [B, 1, 5, 2]
-                    gaze_heatmaps = gaze_preprocessor(batch_gazes_for_proc)
-                    
-                    if gaze_heatmaps.dim() == 5:
-                        gaze_heatmaps = gaze_heatmaps[:, 0]  # Remove time dim
-                    
-                    # Repeat for frame stacking
-                    if batch_images.shape[1] > gaze_heatmaps.shape[1]:
-                        gaze_heatmaps = repeat(gaze_heatmaps, 'b 1 h w -> b s h w', s=batch_images.shape[1])
-                
+                    # Causally aggregate within the pair window
+                    gaze_heatmaps = gaze_preprocessor.build_stack_heatmaps(
+                        batch_gazes_seq, frame_stack=2, center_idx=1
+                    )  # [B, 2, H, W]
+
                 # Visualize this demo
                 gif_path = visualizer.visualize_batch(
                     batch_images,

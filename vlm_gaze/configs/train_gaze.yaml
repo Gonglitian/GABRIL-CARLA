@@ -33,6 +33,12 @@ gaze:
   sigma: 30.0  # Gaussian sigma for gaze mask
   coeff: 0.8   # Base coefficient for gaze mask
   max_points: 5  # Maximum number of gaze points
+  # Optional: multiscale causal aggregation when building supervision heatmaps
+  temporal_mode: "alpha_decay"   # options: alpha_decay, multiscale
+  temporal_sigmas: null           # e.g., [30.0, 24.0]
+  temporal_coeffs: null           # e.g., [1.0, 0.8]
+  temporal_offset_start: 0
+  temporal_use_future: false
 
 # Training configuration
 training:

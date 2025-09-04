@@ -14,7 +14,7 @@ cd "$ROOT_DIR"
 
 # GPU selection and comm envs
 # export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-4,5,6,7}
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-4,5,6,7}
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
 
 # Torchrun params
 NPROC=${NPROC:-4}
@@ -77,11 +77,13 @@ run_one() {
 
 # 多实验组合（可通过环境变量 METHOD_PAIRS 覆盖，逗号分隔；默认内置组合）
 __DEFAULT_METHOD_PAIRS=(
-  # "None:GMD" # exp1
-  "Reg:GMD" # exp2
-  "ViSaRL:None" # exp3
-  # "AGIL:None" # exp4
-  # "GRIL:None" # exp5
+  "None:GMD" 
+  "ViSaRL:None" 
+  "GRIL:None" 
+  "None:None" 
+  "AGIL:None"
+  "Reg:GMD"
+  "Reg:None"
 )
 
 if [[ "${MULTI_RUN:-1}" == "1" ]]; then

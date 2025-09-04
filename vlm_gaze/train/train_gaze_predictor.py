@@ -32,7 +32,12 @@ class GazePredictorTrainer(BaseTrainer):
             gaze_sigma=self.cfg.gaze.sigma,
             gaze_coeff=self.cfg.gaze.coeff,
             maxpoints=self.cfg.gaze.max_points,
-            device=str(self.device)
+            device=str(self.device),
+            temporal_mode=str(getattr(self.cfg.gaze, 'temporal_mode', 'alpha_decay')),
+            temporal_sigmas=getattr(self.cfg.gaze, 'temporal_sigmas', None),
+            temporal_coeffs=getattr(self.cfg.gaze, 'temporal_coeffs', None),
+            temporal_offset_start=int(getattr(self.cfg.gaze, 'temporal_offset_start', 0)),
+            temporal_use_future=bool(getattr(self.cfg.gaze, 'temporal_use_future', False)),
         )
     
     def _print_rank0(self, message: str):

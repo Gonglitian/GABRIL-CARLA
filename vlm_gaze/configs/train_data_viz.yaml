@@ -8,7 +8,7 @@ data:
   num_workers: 4
   prefetch_factor: 4
   # 图像尺寸仅用于热图生成与显示
-  frame_stack: 2  # not used by viz; kept for consistency
+  frame_stack: 4 # not used by viz; kept for consistency
   cache_mode: "low_dim"
   cache_getitem: false
   img_height: 180
@@ -23,7 +23,7 @@ model:
   frame_stack: ${data.frame_stack}
 
 gaze:
-  mask_sigma: 30.0
+  mask_sigma: 15.0
   mask_coeff: 0.8
   max_points: 5
   # 可视化采用基于 stack 窗口的因果聚合（不使用 L/T 时序）
@@ -42,5 +42,5 @@ viz:
   mode: full_demo  # default: read a full demo directly from HDF5
   # Select which demo to visualize
   demo_index: 0    # when demo_key is empty, use index into data group
-  demo_key: "96"     # optional explicit key like "demo_000123"
+  demo_key: "42"     # optional explicit key like "demo_000123"
   stack_window: 4  # 每一帧的热图与前面 (stack_window-1) 帧做因果聚合

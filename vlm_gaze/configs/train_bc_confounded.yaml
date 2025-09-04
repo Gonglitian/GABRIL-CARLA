@@ -12,11 +12,11 @@ data:
   num_episodes: 200
   batch_size: 1000
   cache_mode: "all"
-  cache_getitem: false
 
 # Override gaze configuration
 gaze:
-  method: "None"
+  method: "Reg"
+  mask_sigma: 20.0
 
 # Override dropout configuration  
 dropout:
@@ -24,10 +24,10 @@ dropout:
 
 # Override training configuration
 training:
-  epochs: 500
+  epochs: 200
   use_amp: true
   use_compile: true
-
+  device: "cuda:0"
 # Override scheduler configuration
 scheduler:
   type: "step"

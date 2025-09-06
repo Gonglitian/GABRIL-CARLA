@@ -1,3 +1,15 @@
+```bash
+# 1. 将原始数据转换为numpy格式
+python ./saliency_data_processing/saliency_raw_to_numpy.py --input_path /data3/vla-reasoning/dataset/bdv2  --output_path /data3/vla-reasoning/dataset/bdv2_numpy_gaze --depth 2 --im_size 128 --bbox_source no_filter --gaze_k 2 --gaze_alpha 0.7 --gaze_beta 0.7 --gaze_gamma_frac 0.06 --num_workers 8
+
+# 2. 将numpy数据转换为tfrecord格式
+python ./saliency_data_processing/saliency_numpy_to_tfrecord.py \
+--input_path /data3/vla-reasoning/dataset/bdv2_numpy_gaze \
+--output_path /data3/vla-reasoning/dataset/bdv2_tfrecord_gaze \
+--depth 2 \
+--num_workers 8
+```
+
 ## 显著性（凝视热图）数据处理使用说明
 
 本文档说明如何使用 `bridge_data_v2/saliency_data_processing/` 目录下的两个脚本，将 BridgeData 原始数据集转换为带“凝视/显著性”热图的 Numpy 与 TFRecord 格式：
@@ -59,7 +71,7 @@ bridgedata_raw/
 
 功能概述：
 - 读取原始数据目录，生成每条轨迹的 `observations` 与 `next_observations`；
-- 从 `filter.pkl` 或 `no_filter.pkl` 读取每帧 bbox，转换为与图像同尺寸的二值热图（1 表示 bbox 区域）；
+- 从 `filter.pkl` 或 `no_filter.pkl` 读取每帧 bbox，按“时序多模态高斯”算法将 bbox 中心转为凝视热图，并与图像同尺寸对齐；
 - 将热图写入 `observations/gaze` 与 `next_observations/gaze`（形状 `[H, W, 1]`，`float32`）；
 - 按 `--train_proportion` 将轨迹划分为 train/val，并分别导出为 `out.npy`。
 
@@ -73,6 +85,21 @@ bridgedata_raw/
 - `--num_workers`：并行进程数。
 - `--overwrite`：如目标输出已存在，是否覆盖。
 
+凝视热图（时序多模态高斯）超参：
+- `--gaze_k`：时间窗口半径 k（整数，默认 2）。对第 i 帧，累加 i±j 帧（j∈[0,k]）的高斯核。
+- `--gaze_alpha`：强度衰减系数 α ∈ (0,1)（默认 0.7），权重为 `α^{|j|}`。
+- `--gaze_beta`：半径扩张系数 β ∈ (0,1)（默认 0.7），标准差随时间偏移为 `σ_j = γ · β^{-abs(j)}`。
+- `--gaze_gamma_frac`：基础标准差 γ 的像素比例（默认 0.06），即 `γ = gaze_gamma_frac × im_size`。
+
+算法说明：对第 i 帧，记 bbox 中心为注视点 `(x, y)`（归一化到 `[0,1]` 后再映射到像素坐标），在每个时间偏移 `j ∈ [-k, k]` 上累加二维高斯核：
+
+`g_i = Σ_{j=-k..k} α^{|j|} · N([x_{i+j}, y_{i+j}], (γ^2 · β^{-2|j|}) I)`，并对每帧进行 [0,1] 的 min-max 归一化。
+
+实现细节：
+- 多个 bbox 则视作多模态高斯的叠加；
+- 使用归一化二维高斯 PDF，随后按帧归一化，兼顾“半径扩张 + 强度衰减”；
+- 若某帧缺少 bbox，仍可从邻近帧贡献（窗口内 j≠0 的项）。
+
 运行示例：
 ```bash
 python /home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/bridge_data_v2/saliency_data_processing/saliency_raw_to_numpy.py \
@@ -81,6 +108,7 @@ python /home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/bridge_data_v2/saliency_
   --depth 5 \
   --im_size 128 \
   --bbox_source filter \
+  --gaze_k 2 --gaze_alpha 0.7 --gaze_beta 0.7 --gaze_gamma_frac 0.06 \
   --num_workers 8
 ```
 
@@ -95,12 +123,12 @@ bridgedata_numpy_gaze/
 ```
 
 每条轨迹（numpy 元素）包含字段：
-- `observations` / `next_observations`：字典列表，键包括 `images0`、`state`、`time_stamp`，若存在还包含 `gaze`（`float32`，形状 `[H, W, 1]`）。
+- `observations` / `next_observations`：字典列表，键包括 `images0`、`state`、`time_stamp`；若存在还包含 `gaze`（`float32`，形状 `[H, W, 1]`），其数值为按上文“时序多模态高斯”算法生成并按帧归一化的热图。
 - `actions`：`float32` 列表。
 - `terminals`：与 `actions` 等长的 0/1 序列（末两步会标为 1）。
 - `language`：字符串列表（若无 `lang.txt` 则为空字符串占位）。
 
-注意：如对应轨迹缺少 `filter.pkl`/`no_filter.pkl`，脚本会打印 warning 并跳过写入 `gaze` 键，其余数据仍会正常保存。
+注意：如对应轨迹缺少 `filter.pkl`/`no_filter.pkl`，脚本会打印 warning 并跳过写入 `gaze` 键，其余数据仍会正常保存。若窗口内的其它帧也缺少 bbox，热图将退化为零图。
 
 ---
 
@@ -160,6 +188,7 @@ TFRecord 中的主要键：
   - 例如：若原始数据位于 `bridgedata_raw/rss/toykitchen2/set_table/00/2022-...`，常用 `--depth=5` 并将 `--input_path` 设为 `bridgedata_raw`，这样脚本会匹配 `rss/toykitchen2/set_table/00` 这些父目录并遍历其中的日期文件夹。
   - 若只处理某一子集（如 `bridgedata_raw/rss/toykitchen2`），可设 `--input_path` 为该子目录，并将 `--depth` 相应减小（例如 3）。
 - `--im_size` 请与训练配置一致；热图与图像都会被缩放到该尺寸，保持像素级对齐。
+- 调参与建议：`gaze_k=2~3` 一般足够，`gaze_alpha≈0.7`、`gaze_beta≈0.7` 可体现“过去/未来的强度衰减 + 半径扩张”，`gaze_gamma_frac≈0.05~0.08` 随任务做微调。
 - 训练/验证划分：`saliency_raw_to_numpy.py` 按遍历顺序前 `train_proportion` 比例划入训练集，不做随机打乱；如需随机性，可自行在输入目录层级上打乱或调整脚本。
 
 ---
@@ -175,6 +204,7 @@ TFRecord 中的主要键：
   - 需要重跑时添加 `--overwrite`；或删除对应输出目录后再运行。
 - 性能与并行：
   - 可增大 `--num_workers` 提升吞吐，但注意磁盘与内存瓶颈。
+  - 大 `gaze_k` 会显著增加计算量；如需更高效可考虑预生成可平移的高斯模板并裁剪（参考 `arxived/importrant_files/gaze/gaze_to_mask.py` 的做法）。
 
 ---
 

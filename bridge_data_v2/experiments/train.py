@@ -1,4 +1,5 @@
 import os
+import json
 from functools import partial
 
 import jax
@@ -69,6 +70,17 @@ def main(_):
         wandb_logger.config.project,
         f"{wandb_logger.config.exp_descriptor}_{wandb_logger.config.unique_identifier}",
     )
+
+    # ensure save_dir exists and write a config snapshot for eval
+    tf.io.gfile.makedirs(save_dir)
+    try:
+        cfg = FLAGS.config.to_dict()
+        # also persist bridgedata_config used for normalization etc.
+        cfg["bridgedata_config"] = FLAGS.bridgedata_config.to_dict()
+        with tf.io.gfile.GFile(os.path.join(save_dir, "config.json"), "w") as f:
+            json.dump(cfg, f)
+    except Exception as e:
+        logging.warning("Failed to write config.json: %s", e)
 
     # load datasets
     assert type(FLAGS.bridgedata_config.include[0]) == list

@@ -34,7 +34,6 @@ def apply_gmd_dropout(z, g, test_mode = False):
     dropout_prob = 0.7
     B, C, H, W = z.shape
     A = torch.rand([B, 1, H, W], device=z.device)
-    # g 可能是 [B, S, h, w]（例如 frame_stack>1），将其插值并压到单通道，避免与特征通道数不匹配
     if g.dim() == 3:
         g = g.unsqueeze(1)
     K = torch.nn.functional.interpolate(g, size=(H, W), mode='bicubic')

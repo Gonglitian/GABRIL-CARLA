@@ -109,6 +109,10 @@ def load_checkpoint(checkpoint_weights_path, checkpoint_config_path):
         }
     elif FLAGS.goal_type == "lc":
         example_goals = {"language": np.zeros((1, 512), dtype=np.float32)}
+    elif FLAGS.goal_type == "bc":
+        example_goals = {
+            "image": np.zeros((1, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
+        }
     else:
         raise ValueError(f"Unknown goal type: {FLAGS.goal_type}")
 
@@ -236,6 +240,8 @@ def main(_):
             image_goal = np.array(Image.open(FLAGS.goal_image_path))
     elif FLAGS.goal_type == "lc":
         instruction = None
+    elif FLAGS.goal_type == "bc":
+        image_goal = None
 
     # goal sampling loop
     while True:
@@ -271,6 +277,9 @@ def main(_):
             instruction = request_goal_language(None, text_processors)
             goal_obs = {"language": instruction}
             input("Press [Enter] to start.")
+        elif FLAGS.goal_type == "bc":
+            goal_obs = {"image": np.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)}
+            input("Press [Enter] to start BC evaluation.")
         else:
             raise ValueError(f"Unknown goal type: {FLAGS.goal_type}")
 

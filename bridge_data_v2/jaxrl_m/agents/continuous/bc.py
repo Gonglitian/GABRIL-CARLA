@@ -43,8 +43,10 @@ class BCAgent(flax.struct.PyTreeNode):
                 {
                     "actor_loss": actor_loss,
                     "mse": mse.mean(),
-                    "log_probs": log_probs,
-                    "pi_actions": pi_actions,
+                    # Use means for logging to keep metrics scalar and
+                    # consistent with GCBC/LCBC logging.
+                    "log_probs": log_probs.mean(),
+                    "pi_actions": pi_actions.mean(),
                     "mean_std": actor_std.mean(),
                     "max_std": actor_std.max(),
                 },
@@ -100,6 +102,7 @@ class BCAgent(flax.struct.PyTreeNode):
         cls,
         rng: PRNGKey,
         observations: FrozenDict,
+        goals: FrozenDict,  # 添加 goals 参数但不使用
         actions: jnp.ndarray,
         # Model architecture
         encoder_def: nn.Module,
@@ -108,7 +111,6 @@ class BCAgent(flax.struct.PyTreeNode):
         policy_kwargs: dict = {
             "tanh_squash_distribution": False,
             "state_dependent_std": False,
-            "dropout": 0.0,
         },
         # Optimizer
         learning_rate: float = 3e-4,
@@ -141,7 +143,7 @@ class BCAgent(flax.struct.PyTreeNode):
         tx = optax.adam(lr_schedule)
 
         rng, init_rng = jax.random.split(rng)
-        params = model_def.init(init_rng, actor=observations)["params"]
+        params = model_def.init(init_rng, actor=[observations])["params"]
 
         rng, create_rng = jax.random.split(rng)
         state = JaxRLTrainState.create(

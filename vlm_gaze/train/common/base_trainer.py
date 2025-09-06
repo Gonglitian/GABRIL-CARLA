@@ -22,7 +22,7 @@ class BaseTrainer:
         self.is_distributed, self.rank, self.world_size, self.local_rank, self.device = \
             init_distributed_if_enabled(cfg.training)
         # Seed
-        self._set_seed(cfg.training.seed + self.rank)
+        self._set_seed(cfg.training.seed)
 
         # Data
         self._setup_data()

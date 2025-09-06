@@ -14,11 +14,11 @@ cd "$ROOT_DIR"
 
 # GPU selection and comm envs
 # export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-4,5,6,7}
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-3,4,7}
 
 # Torchrun params
-NPROC=${NPROC:-4}
-MASTER_PORT=${MASTER_PORT:-29502}
+NPROC=${NPROC:-3}
+MASTER_PORT=${MASTER_PORT:-29501}
 export MASTER_ADDR=127.0.0.1
 
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
@@ -71,20 +71,29 @@ run_one() {
     --rdzv_backend=c10d \
     --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
     vlm_gaze/train/train_bc.py \
-    --config-name=train_bc_confounded \
+    --config-name=train_bc \
     "${extra_overrides[@]}"
 }
 
 # 多实验组合（可通过环境变量 METHOD_PAIRS 覆盖，逗号分隔；默认内置组合）
 __DEFAULT_METHOD_PAIRS=(
-  "None:GMD" 
-  "ViSaRL:None" 
-  "GRIL:None" 
+  # "None:GMD" 
+  # "ViSaRL:None" 
+  # "GRIL:None" 
   "None:None" 
-  "AGIL:None"
-  "Reg:GMD"
-  "Reg:None"
+  # "AGIL:None"
+  # "Reg:GMD"
+  # "Reg:None"
 )
+
+# 默认的 gaze.ratio 组合（可通过环境变量 RATIOS 覆盖，逗号分隔，如 "0.1,0.25,0.5,0.75"）
+__DEFAULT_GAZE_RATIOS=(
+  1
+)
+
+
+
+
 
 if [[ "${MULTI_RUN:-1}" == "1" ]]; then
   # 如果用户提供 METHOD_PAIRS 以逗号分隔，则解析为数组
@@ -95,28 +104,43 @@ if [[ "${MULTI_RUN:-1}" == "1" ]]; then
     METHOD_PAIRS_ARR=("${__DEFAULT_METHOD_PAIRS[@]}")
   fi
 
+  # 解析 RATIOS（gaze.ratio）。允许通过环境变量 RATIOS 覆盖，使用逗号分隔
+  RATIOS_ARR=()
+  if [[ -n "${RATIOS:-}" ]]; then
+    IFS=',' read -r -a RATIOS_ARR <<< "${RATIOS}"
+  else
+    RATIOS_ARR=("${__DEFAULT_GAZE_RATIOS[@]}")
+  fi
+
   echo "=== Multi-run DDP BC Training ==="
-  echo "Will run ${#METHOD_PAIRS_ARR[@]} method pairs"
+  total_pairs=${#METHOD_PAIRS_ARR[@]}
+  total_ratios=${#RATIOS_ARR[@]}
+  total_runs=$(( total_pairs * total_ratios ))
+  echo "Will run ${total_pairs} method pairs x ${total_ratios} ratios = ${total_runs} runs"
+  echo "Method pairs:"
   for pair in "${METHOD_PAIRS_ARR[@]}"; do
     IFS=':' read -r gaze_method dropout_method <<< "${pair}"
     echo "  - gaze.method=${gaze_method}, dropout.method=${dropout_method}"
   done
+  echo "Ratios: ${RATIOS_ARR[*]}"
   echo ""
 
   __run_counter=0
   for pair in "${METHOD_PAIRS_ARR[@]}"; do
     IFS=':' read -r gaze_method dropout_method <<< "${pair}"
-    __run_counter=$((__run_counter + 1))
-    echo "=== Run ${__run_counter}/${#METHOD_PAIRS_ARR[@]}: gaze.method=${gaze_method}, dropout.method=${dropout_method} ==="
-    if ! run_one gaze.method="${gaze_method}" dropout.method="${dropout_method}" "$@"; then
-      echo "ERROR: Run ${__run_counter} failed (gaze=${gaze_method}, dropout=${dropout_method})"
-      echo "Continuing with next experiment..."
+    for ratio in "${RATIOS_ARR[@]}"; do
+      __run_counter=$((__run_counter + 1))
+      echo "=== Run ${__run_counter}/${total_runs}: gaze.method=${gaze_method}, dropout.method=${dropout_method}, gaze.ratio=${ratio} ==="
+      if ! run_one gaze.method="${gaze_method}" dropout.method="${dropout_method}" gaze.ratio="${ratio}" "$@"; then
+        echo "ERROR: Run ${__run_counter} failed (gaze=${gaze_method}, dropout=${dropout_method}, ratio=${ratio})"
+        echo "Continuing with next experiment..."
+        sleep 5
+        continue
+      fi
+      echo "=== Run ${__run_counter} completed successfully ==="
+      echo ""
       sleep 5
-      continue
-    fi
-    echo "=== Run ${__run_counter} completed successfully ==="
-    echo ""
-    sleep 5
+    done
   done
   echo "=== All experiments completed! ==="
 else

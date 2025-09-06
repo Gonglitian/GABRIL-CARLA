@@ -230,21 +230,26 @@ class BCAgent(AutonomousAgent):
         Execute one step of navigation.
         """
 
-        image_center = input_data['Center'][1][:, :, -2::-1]
-        
-        # 先在进入模型前进行 overlay（上一时刻动作）
+        # Convert CARLA BGRA -> RGB and drop alpha
+        image_center_rgb = input_data['Center'][1][:, :, -2::-1]
+
+        # Important: never contaminate model inputs with overlays.
+        # Build a separate frame for recording/visualization only.
+        frame_for_video = image_center_rgb.copy()
         if self.confounded and self.prev_control is not None:
             try:
-                image_center = self._draw_action_overlay(image_center, self.prev_control)
+                frame_for_video = self._draw_action_overlay(frame_for_video, self.prev_control)
                 self._debug_print_overlay_info(self.steps, success=True)
             except Exception as e:
                 self._debug_print_overlay_info(self.steps, success=False, error=e)
+                # Proceed with clean inputs even if overlay fails
                 pass
-        self.frames_to_record.append(image_center)
+        # Record the (possibly overlayed) frame for exported video
+        self.frames_to_record.append(frame_for_video)
         self.agent_engaged = True
-        
-        # 基于 overlay 后的图像构造 obs
-        obs = image_center.copy()
+
+        # Use the clean RGB frame for model inputs
+        obs = image_center_rgb.copy()
         if self.obs_res_c == 1:
             # 观测为 RGB，需使用 RGB->GRAY，避免与训练不一致
             obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
@@ -320,7 +325,7 @@ class BCAgent(AutonomousAgent):
         self._debug_print_step_info(
             step=self.steps,
             input_data=input_data,
-            image_center=image_center,
+            image_center=image_center_rgb,
             obs=obs,
             stacked_obs_np=stacked_obs_np,
             stacked_obs_torch=stacked_obs_torch,
@@ -333,11 +338,11 @@ class BCAgent(AutonomousAgent):
         # 更新上一时刻 control（供下一帧 overlay 使用）
         if self.confounded:
             self.prev_control = control
-        
-        self.steps += 1
+
+        # 前期冷启动：前 10 帧输出空控制，避免早期不稳定
         if self.steps < 10:
             return noop_control()
-        
+        # Stop extremely long episodes to avoid hangs
         elif self.steps > self.fps * 100:
             raise Exception("BCAgent failed to finish the route")
 

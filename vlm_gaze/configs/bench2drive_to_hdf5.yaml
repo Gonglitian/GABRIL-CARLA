@@ -1,5 +1,5 @@
-dataset_root: "/data3/vla-reasoning/dataset/bench2drive220_confounded"
-output_hdf5: "/data3/vla-reasoning/dataset/bench2drive220_robomimic_confounded.hdf5"
+dataset_root: "/data3/vla-reasoning/dataset/bench2drive220"
+output_hdf5: "/data3/vla-reasoning/dataset/bench2drive220_robomimic.hdf5"
 
 # Which gaze-like annotations to include in HDF5
 # All four can coexist in the file; training can choose which to use.

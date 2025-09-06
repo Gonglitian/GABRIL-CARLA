@@ -1,121 +1,34 @@
-# Hydra configuration for Behavior Cloning with Gaze Regularization (GABRIL)
+# Hydra configuration for Behavior Cloning with Confounded Dataset
+# Inherits from train_bc_base.yaml and overrides specific parameters
 
 defaults:
+  - train_bc_base
   - _self_
 
-# Data configuration
+# Override data configuration for confounded dataset
 data:
-  task: "Mixed_"  # Task name from Task_to_Route
   hdf5_path: "/data3/vla-reasoning/dataset/bench2drive220_robomimic.hdf5"
-  num_episodes: 200 # Number of episodes to use for training
-  batch_size: 4000
-  num_workers: 8
-  prefetch_factor: 4
-  frame_stack: 2  # Number of frames to stack
-  cache_mode: "low_dim"  # HDF5 cache mode: "all", "low_dim", or null
-  cache_getitem: false   # When cache_mode=="all", avoid get_item caching to save memory
-  img_height: 180
-  img_width: 320
-  action_dim: 7  # Dimension of action space
-  # Which gaze coords to read from HDF5 (must exist under data/demo_X/obs/<key>)
-  # Examples: gaze_coords, gaze_coords_gaze, gaze_coords_gaze_pseudo, gaze_coords_filter_dynamic, gaze_coords_non_filter
-  gaze_key: "gaze_coords"
+  gaze_key: "gaze_coords_filter_dynamic"
+  num_episodes: 200
+  batch_size: 2000
+  cache_mode: "all"
 
-# Model configuration
-model:
-  grayscale: true  # Whether to convert images to grayscale
-  frame_stack: ${data.frame_stack}  # Reference from data config
-  embedding_dim: 64
-  num_hiddens: 128
-  num_residual_layers: 2
-  num_residual_hiddens: 32
-  z_dim: 256  # Latent dimension
-
-# Gaze configuration
+# Override gaze configuration
 gaze:
-  method: "Reg"  # Gaze method: None, Teacher, Reg, Mask, Contrastive, ViSaRL, AGIL, GRIL
-  mask_sigma: 30.0  # Sigma for Gaussian gaze mask
-  mask_coeff: 0.8  # Base coefficient for gaze mask
-  max_points: 5  # Maximum number of gaze points
-  beta: 50.0  # Softmax temperature for GABRIL
-  lambda_weight: 10.0  # Loss coefficient for gaze regularization
-  contrastive_threshold: 10.0  # Threshold for contrastive method
-  prob_dist_type: "MSE"  # Probability distribution type: MSE, TV, KL, JS
-  ratio: 1.0  # Ratio of episodes to use gaze
-  # Stack-wise causal aggregation (ignore L, aggregate along S with alpha decay)
-  temporal_flag: true
-  temporal_alpha: 0.7
-  # Causal multiscale aggregation (optional). If temporal_mode=='multiscale' and lists are set,
-  # use per-step sigmas / coeffs to aggregate only from past frames.
-  temporal_mode: "alpha_decay"   # options: alpha_decay, multiscale
-  temporal_sigmas: null           # e.g., [30.0, 24.0, 18.0, 12.0]
-  temporal_coeffs: null           # e.g., [1.0, 0.8, 0.6, 0.4]
-  temporal_offset_start: 0        # index offset into the lists
-  temporal_use_future: false      # keep causality: only aggregate past frames
+  method: "Reg"
+  mask_sigma: 20.0
 
-# Dropout configuration
+# Override dropout configuration  
 dropout:
-  method: "None"  # Dropout method: None, Oreo, IGMD, GMD
-  num_embeddings: 512  # Number of embeddings for VQ-VAE (Oreo)
-  oreo_num_mask: 4  # Number of masks for Oreo
-  oreo_prob: 0.5  # Masking probability for Oreo
-  vqvae_path: ""  # Path to pre-trained VQ-VAE model (for Oreo)
+  method: "None"
 
-# Optimizer configuration
-optimizer:
-  type: "adam"  # Optimizer type: adam, adamw
-  lr: 5e-4  # Learning rate
-  weight_decay: 0.0  # Weight decay
-
-# Scheduler configuration
-scheduler:
-  type: "cosine_warmup"  # Scheduler type: none, step, cosine, cosine_warmup, cosine_warm_restarts, onecycle
-  step_size: 50  # Step size for StepLR
-  gamma: 0.5  # Gamma for StepLR
-  eta_min: 1e-6  # Minimum LR for cosine schedulers
-  warmup_steps: 500  # Number of warmup steps for cosine_warmup
-  # Cosine warm restarts parameters
-  T_0: 10
-  T_mult: 1
-  # OneCycle scheduler parameters
-  pct_start: 0.3
-  anneal_strategy: "cos"
-  div_factor: 25.0
-  final_div_factor: 10000.0
-
-# Training configuration
+# Override training configuration
 training:
-  seed: 42
-  epochs: 500
+  epochs: 200
+  use_amp: true
+  use_compile: true
   device: "cuda:0"
-  use_amp: true  # Use automatic mixed precision
-  use_compile: true  # Use torch.compile (requires PyTorch 2.0+)
-  compile_backend: "inductor"  # torch.compile backend: inductor, aot_eager, etc.
-  compile_mode: "default"      # torch.compile mode: default, reduce-overhead, max-autotune
-  gradient_accumulation_steps: 1
-  save_interval: 50  # Save checkpoint every N epochs
-  distributed:
-    enabled: false
-    backend: "nccl"
-    find_unused_parameters: false
-    broadcast_buffers: true
-    gradient_as_bucket_view: true # for DDP bucket view
-
-# Logging configuration
-logging:
-  log_dir: "/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/runs"  # TensorBoard logs directory
-  checkpoint_dir: "/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/runs"  # Model checkpoints directory
-  save_params: true  # Save params.json for evaluation
-
-# Optional tag for experiment naming
-tag: ""
-
-# Hydra configuration
-hydra:
-  run:
-    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  sweep:
-    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    subdir: ${hydra.job.num}
-  job:
-    chdir: false
+# Override scheduler configuration
+scheduler:
+  type: "step"
+  step_size: 50

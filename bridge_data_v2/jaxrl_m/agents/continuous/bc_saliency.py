@@ -124,7 +124,7 @@ def _get_gaze_mask_from_features(
     import jax.image as jimage
     # Use linear resize for compatibility
     z_resized = jimage.resize(
-        z_softmax, shape=(b, target_hw[0], target_hw[1], 1), method="linear"
+        z_softmax, shape=(b, target_hw[0], target_hw[1], 1), method="cubic"
     )
 
     return _normalize_minmax(z_resized)

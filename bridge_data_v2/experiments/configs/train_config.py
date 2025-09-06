@@ -64,7 +64,8 @@ def get_config(config_string):
                 ),
                 encoder="resnetv1-34-bridge",
                 encoder_kwargs=dict(
-                    pooling_method="avg", add_spatial_coordinates=True, act="swish"
+                    # Keep spatial features so the agent can build saliency maps
+                    pooling_method="none", add_spatial_coordinates=True, act="swish"
                 ),
                 **base_real_config,
             )
@@ -208,6 +209,76 @@ def get_config(config_string):
                 encoder="resnetv1-34-bridge",
                 encoder_kwargs=dict(
                     pooling_method="avg", add_spatial_coordinates=False, act="swish"
+                ),
+                **base_real_config,
+            )
+        ),
+        "bc": ConfigDict(
+            dict(
+                agent="bc",
+                agent_kwargs=dict(
+                    network_kwargs=dict(hidden_dims=(256, 256, 256), dropout_rate=0.1),
+                    policy_kwargs=dict(
+                        tanh_squash_distribution=False,
+                        # For plain BC, learning the global std tends to
+                        # collapse it toward 0, which makes training actor_loss
+                        # go negative (log_probs >> 0) and hurts validation
+                        # likelihood. Use a fixed std like GCBC to stabilize.
+                        fixed_std=[1, 1, 1, 1, 1, 1, 1],
+                        state_dependent_std=False,
+                    ),
+                    use_proprio=False,
+                    learning_rate=3e-4,
+                    warmup_steps=2000,
+                    decay_steps=int(2e6),
+                ),
+                dataset_kwargs=dict(
+                    goal_relabeling_strategy="uniform",
+                    goal_relabeling_kwargs=dict(reached_proportion=0.0),
+                    relabel_actions=True,
+                    **base_data_config,
+                ),
+                encoder="resnetv1-34-bridge",
+                encoder_kwargs=dict(
+                    pooling_method="avg", add_spatial_coordinates=True, act="swish"
+                ),
+                **base_real_config,
+            )
+        ),
+        "bc_saliency": ConfigDict(
+            dict(
+                agent="bc_saliency",
+                agent_kwargs=dict(
+                    network_kwargs=dict(hidden_dims=(256, 256, 256), dropout_rate=0.1),
+                    policy_kwargs=dict(
+                        tanh_squash_distribution=False,
+                        # like BC, keep fixed std to stabilize log-prob training
+                        fixed_std=[1, 1, 1, 1, 1, 1, 1],
+                        state_dependent_std=False,
+                    ),
+                    # saliency/gaze-reg hyperparams
+                    lambda_weight=1.0,
+                    prob_dist_type="KL",  # one of [KL, JS, TV, MSE]
+                    gaze_ratio=1.0,
+                    beta=1.0,  # temperature in softmax for feature-derived mask
+                    use_proprio=False,
+                    learning_rate=3e-4,
+                    warmup_steps=2000,
+                    decay_steps=int(2e6),
+                ),
+                dataset_kwargs=dict(
+                    goal_relabeling_strategy="uniform",
+                    goal_relabeling_kwargs=dict(reached_proportion=0.0),
+                    relabel_actions=True,
+                    # Enable gaze loading and disable image augmentations to
+                    # keep gaze-image spatial alignment during training.
+                    load_gaze=True,
+                    augment=False,
+                    **base_data_config,
+                ),
+                encoder="resnetv1-34-bridge",
+                encoder_kwargs=dict(
+                    pooling_method="none", add_spatial_coordinates=True, act="swish"
                 ),
                 **base_real_config,
             )

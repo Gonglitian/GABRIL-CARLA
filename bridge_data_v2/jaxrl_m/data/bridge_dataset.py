@@ -147,6 +147,7 @@ class BridgeDataset:
         act_pred_horizon: Optional[int] = None,
         obs_horizon: Optional[int] = None,
         load_language: bool = False,
+        load_gaze: bool = False,
         skip_unlabeled: bool = False,
         **kwargs,
     ):
@@ -171,9 +172,13 @@ class BridgeDataset:
         self.obs_horizon = obs_horizon
         self.is_train = train
         self.load_language = load_language
+        self.load_gaze = load_gaze
 
         if self.load_language:
             self.PROTO_TYPE_SPEC["language"] = tf.string
+        if self.load_gaze:
+            self.PROTO_TYPE_SPEC["observations/gaze"] = tf.float32
+            self.PROTO_TYPE_SPEC["next_observations/gaze"] = tf.float32
 
         # construct a dataset for each sub-list of paths
         datasets = []
@@ -277,20 +282,30 @@ class BridgeDataset:
             for key, dtype in self.PROTO_TYPE_SPEC.items()
         }
         # restructure the dictionary into the downstream format
-        return {
-            "observations": {
-                "image": parsed_tensors["observations/images0"],
-                "proprio": parsed_tensors["observations/state"],
-            },
-            "next_observations": {
-                "image": parsed_tensors["next_observations/images0"],
-                "proprio": parsed_tensors["next_observations/state"],
-            },
+        obs = {
+            "image": parsed_tensors["observations/images0"],
+            "proprio": parsed_tensors["observations/state"],
+        }
+        next_obs = {
+            "image": parsed_tensors["next_observations/images0"],
+            "proprio": parsed_tensors["next_observations/state"],
+        }
+        if self.load_gaze:
+            # Optional; only present if written by saliency_numpy_to_tfrecord
+            if "observations/gaze" in parsed_tensors:
+                obs["gaze"] = parsed_tensors["observations/gaze"]
+            if "next_observations/gaze" in parsed_tensors:
+                next_obs["gaze"] = parsed_tensors["next_observations/gaze"]
+
+        out = {
+            "observations": obs,
+            "next_observations": next_obs,
             **({"language": parsed_tensors["language"]} if self.load_language else {}),
             "actions": parsed_tensors["actions"],
             "terminals": parsed_tensors["terminals"],
             "truncates": parsed_tensors["truncates"],
         }
+        return out
 
     def _process_actions(self, traj):
         if self.relabel_actions:

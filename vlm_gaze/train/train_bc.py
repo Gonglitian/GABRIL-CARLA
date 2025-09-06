@@ -42,7 +42,8 @@ class BCTrainer(BaseTrainer):
             temporal_offset_start=int(getattr(self.cfg.gaze, 'temporal_offset_start', 0)),
         )
         self.criterion = nn.MSELoss()
-
+        self.gaze_ratio = float(getattr(self.cfg.gaze, 'ratio', 1.0))
+        
     def _print_rank0(self, message: str):
         """
         Print message only on rank 0
@@ -224,7 +225,19 @@ class BCTrainer(BaseTrainer):
         batch_size = obs_image.shape[0]
         with torch.no_grad():
             pass  # gaze_heatmaps 已由预处理器生成
-        ivg = torch.ones(batch_size, dtype=torch.float32, device=self.device)
+        
+        # 根据 gaze.ratio 参数决定哪些样本使用 gaze 信息（按样本独立且与顺序无关）
+        if self.gaze_ratio >= 1.0:
+            ivg = torch.ones(batch_size, dtype=torch.float32, device=self.device)
+        elif self.gaze_ratio <= 0.0:
+            ivg = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
+        else:
+            # 为每个样本生成稳定的伪随机数 r_i ∈ [0,1)，与 batch 顺序无关
+            # 做法：利用样本图像内容求一个标量 key_i，再通过 frac(abs(key * 常数)) 得到 r_i
+            # 注：不使用 torch.randperm，以避免顺序依赖
+            per_sample_key = obs_image.float().sum(dim=(1, 2, 3))  # [B]
+            r = torch.frac(torch.abs(per_sample_key * 123456.789))  # [B], ∈ [0,1)
+            ivg = (r < self.gaze_ratio).float()
         with torch.amp.autocast('cuda', enabled=self.cfg.training.use_amp):
             xx = obs_image; gg = gaze_heatmaps
             # For GRIL, use coordinates at center timestep if sequence provided
@@ -232,14 +245,33 @@ class BCTrainer(BaseTrainer):
                 gc = gaze_coords_raw[:, center_idx]
             else:
                 gc = gaze_coords_raw
-            gaze_dropout_mask = gg if self.cfg.dropout.method == 'IGMD' else None
-            z = self.encoder(xx if self.cfg.gaze.method != 'Mask' else xx * gg, dropout_mask=gaze_dropout_mask)
-            if self.cfg.gaze.method == 'ViSaRL':
-                z = self.encoder(torch.cat([obs_image, gg], dim=1), dropout_mask=gaze_dropout_mask)
+            # Build encoder input per gaze method to avoid channel mismatch
+            # 掩码策略：
+            # - 对于 Mask 方法：未使用 gaze 的样本采用单位掩码（全1），等价于纯BC
+            # - 对于 ViSaRL / IGMD / GMD：未使用 gaze 的样本采用零掩码（全0）
+            ivg_expanded = ivg.view(-1, 1, 1, 1).expand_as(gg)
+            ones_like_gg = torch.ones_like(gg)
+            # 用于乘法的掩码（Mask、AGIL 的分支里使用）：未用 gaze -> 1，用 gaze -> gg
+            gg_for_mul = ivg_expanded * gg + (1 - ivg_expanded) * ones_like_gg
+            # 用于拼接或dropout的掩码（ViSaRL、IGMD、GMD）：未用 gaze -> 0，用 gaze -> gg
+            gg_for_cat = ivg_expanded * gg
+            gaze_dropout_mask = gg_for_cat if self.cfg.dropout.method == 'IGMD' else None
+
+            if self.cfg.gaze.method == 'Mask':
+                enc_in = xx * gg_for_mul
+            elif self.cfg.gaze.method == 'ViSaRL':
+                # Concatenate image stack with gaze heatmaps along channel dim
+                enc_in = torch.cat([xx, gg_for_cat], dim=1)
+            else:
+                enc_in = xx
+            z = self.encoder(enc_in, dropout_mask=gaze_dropout_mask)
             if self.cfg.gaze.method == 'AGIL' and self.encoder_agil is not None:
-                z = (z + self.encoder_agil(obs_image * gg)) / 2
+                # AGIL：使用与 Mask 相同的乘法掩码；未用 gaze 的样本退化为单流 z
+                z_agil = self.encoder_agil(xx * gg_for_mul)
+                ivg_bz = ivg.view(-1, 1, 1, 1)
+                z = torch.where(ivg_bz > 0, 0.5 * (z + z_agil), z)
             if self.cfg.dropout.method == 'GMD':
-                z = apply_gmd_dropout(z, gg, test_mode=False)
+                z = apply_gmd_dropout(z, gg_for_cat, test_mode=False)
             elif self.cfg.dropout.method == 'Oreo' and self.quantizer is not None:
                 with torch.no_grad():
                     _, _, _, _, encoding_indices, _ = self.quantizer(z)

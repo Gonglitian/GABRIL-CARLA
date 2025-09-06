@@ -51,6 +51,33 @@ def get_config(config_string):
                 "sample_weights": None,
                 "action_proprio_metadata": ACTION_PROPRIO_METADATA,
             }
-        )
+        ),
+        "bdv2_local": ml_collections.ConfigDict(
+            {
+                "include": [["?*"]],  # match <task>
+                "exclude": [],
+                "sample_weights": None,
+                "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+            }
+        ),
+        "open_microwave": ml_collections.ConfigDict({
+        "include": [["open_microwave"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+        "put_in_pot_lid": ml_collections.ConfigDict({
+        "include": [["put_in_pot_lid"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+        "remove_pot_lid": ml_collections.ConfigDict({
+        "include": [["remove_pot_lid"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
     }
+    
     return possible_structures[config_string]

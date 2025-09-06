@@ -6,6 +6,7 @@
 # route list:[2416,3100,3472,24211,24258,24759,25857,25863,26408,27494]
 routes=(2416 3100 3472 24211 24258 24759 25857 25863 26408 27494)
 
+run_dir=/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/runs/Mixed_
 # todo: change dir
 cd /home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/vlm_gaze/eval
 
@@ -78,9 +79,9 @@ for route_id in "${routes[@]}"; do
     for seed in "${random_seeds[@]}"; do
         echo "  运行seed: $seed"
         if [ "$confounded" = true ]; then
-            python env_manager.py --agent=BC --params_path=$model --seed=$seed --routes-id=$route_id --video_path=auto --traffic-manager-port=$traffic_manager_port --port=$port --confounded
+            python env_manager.py --agent=BC --params_path=$run_dir/$model --seed=$seed --routes-id=$route_id --video_path=auto --traffic-manager-port=$traffic_manager_port --port=$port --confounded
         else
-            python env_manager.py --agent=BC --params_path=$model --seed=$seed --routes-id=$route_id --video_path=auto --traffic-manager-port=$traffic_manager_port --port=$port
+            python env_manager.py --agent=BC --params_path=$run_dir/$model --seed=$seed --routes-id=$route_id --video_path=auto --traffic-manager-port=$traffic_manager_port --port=$port
         fi
         echo "  seed $seed 运行完成"
     done

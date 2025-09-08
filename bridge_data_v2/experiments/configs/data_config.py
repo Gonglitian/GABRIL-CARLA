@@ -60,20 +60,8 @@ def get_config(config_string):
                 "action_proprio_metadata": ACTION_PROPRIO_METADATA,
             }
         ),
-        "open_microwave": ml_collections.ConfigDict({
-        "include": [["open_microwave"]],
-        "exclude": [],
-        "sample_weights": None,
-        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
-    }),
-        "put_in_pot_lid": ml_collections.ConfigDict({
-        "include": [["put_in_pot_lid"]],
-        "exclude": [],
-        "sample_weights": None,
-        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
-    }),
-        "remove_pot_lid": ml_collections.ConfigDict({
-        "include": [["remove_pot_lid"]],
+    "remove_pot_lid_150": ml_collections.ConfigDict({
+        "include": [["remove_pot_lid_150"]],
         "exclude": [],
         "sample_weights": None,
         "action_proprio_metadata": ACTION_PROPRIO_METADATA,

@@ -1,7 +1,7 @@
 global:
   # Paths
-  data_root: /scr/litian/dataset/bdv2_tfrecord
-  save_dir: /scr/litian/exp/bdv2_runs_0907
+  data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
+  save_dir: /data3/vla-reasoning/exp/bdv2_runs_0908
 
   # Training schedule
   train_batch_size: 2000
@@ -15,6 +15,9 @@ global:
   eval_batches: null
 
   # Default decay steps per algorithm (can override per-run)
+  decay_steps_bc: 50000
+  decay_steps_gc_bc: 50000
+  actor_decay_steps_gc_ddpm_bc: 50000
   decay_steps_bc: 50000
   decay_steps_gc_bc: 50000
   actor_decay_steps_gc_ddpm_bc: 50000

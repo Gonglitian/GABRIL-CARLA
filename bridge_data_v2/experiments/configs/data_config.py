@@ -78,6 +78,36 @@ def get_config(config_string):
         "sample_weights": None,
         "action_proprio_metadata": ACTION_PROPRIO_METADATA,
     }),
+        "lift_carrot_100": ml_collections.ConfigDict({
+        "include": [["lift_carrot_100"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+    "pull_pot_100": ml_collections.ConfigDict({
+        "include": [["pull_pot_100"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+    "put_carrot_in_pot_100": ml_collections.ConfigDict({
+        "include": [["put_carrot_in_pot_100"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+    "lift_carrot_100_confounded": ml_collections.ConfigDict({
+        "include": [["lift_carrot_100_confounded"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
+    "remove_pot_lid_150": ml_collections.ConfigDict({
+        "include": [["remove_pot_lid_150"]],
+        "exclude": [],
+        "sample_weights": None,
+        "action_proprio_metadata": ACTION_PROPRIO_METADATA,
+    }),
     }
     
     return possible_structures[config_string]

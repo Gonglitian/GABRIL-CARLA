@@ -6,6 +6,18 @@ import jax.numpy as jnp
 from einops import rearrange, repeat
 
 
+def _flatten_proprio(proprio: jnp.ndarray) -> jnp.ndarray:
+    """Flattens proprio into shape [B, -1] regardless of time dims.
+
+    Handles cases like [B, P], [B, 1, P], or [B, T, P] by collapsing
+    all dimensions after the batch into a single feature dimension.
+    """
+    if proprio.ndim < 2:
+        # Ensure at least [B, F]-like shape; unexpected but guard just in case
+        return proprio.reshape((1, -1))
+    return proprio.reshape((proprio.shape[0], -1))
+
+
 class EncodingWrapper(nn.Module):
     """
     Encodes observations into a single flat encoding, adding additional
@@ -24,7 +36,8 @@ class EncodingWrapper(nn.Module):
     def __call__(self, observations: Dict[str, jnp.ndarray]) -> jnp.ndarray:
         encoding = self.encoder(observations["image"])
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = _flatten_proprio(observations["proprio"])
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)
         return encoding
@@ -87,7 +100,8 @@ class GCEncodingWrapper(nn.Module):
             )
 
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = _flatten_proprio(observations["proprio"])
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
 
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)
@@ -139,7 +153,8 @@ class LCEncodingWrapper(nn.Module):
             )
 
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = _flatten_proprio(observations["proprio"])
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
 
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)

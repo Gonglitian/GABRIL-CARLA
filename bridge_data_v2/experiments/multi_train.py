@@ -17,6 +17,38 @@ import subprocess
 import sys
 import shlex
 from typing import Any, Dict, List
+import site
+
+
+def _discover_nvidia_pip_lib_dirs() -> List[str]:
+    """Return pip-provided NVIDIA runtime library dirs if present.
+
+    Scans site-packages for common CUDA runtime libs shipped as wheels
+    (e.g., nvidia-cudnn-cu12, nvidia-cublas-cu12, nvidia-nvjitlink-cu12).
+    The returned directories can be prepended to LD_LIBRARY_PATH to ensure
+    XLA/JAX can locate compatible CUDA runtime libraries without relying on
+    a system-installed toolkit.
+    """
+    lib_roots = []
+    candidates = [
+        ("nvidia", "nvjitlink", "lib"),
+        ("nvidia", "cublas", "lib"),
+        ("nvidia", "cudnn", "lib"),
+        ("nvidia", "cusolver", "lib"),
+        ("nvidia", "cusparse", "lib"),
+    ]
+
+    for base in site.getsitepackages() + [site.getusersitepackages()]:
+        for parts in candidates:
+            path = os.path.join(base, *parts)
+            if os.path.isdir(path):
+                lib_roots.append(path)
+    # Deduplicate while preserving order
+    deduped: List[str] = []
+    for p in lib_roots:
+        if p not in deduped:
+            deduped.append(p)
+    return deduped
 
 try:
     import yaml  # type: ignore
@@ -152,8 +184,25 @@ def main() -> None:
 
     # Base environment for spawned processes
     base_env = os.environ.copy()
-    if g.get("cuda_visible_devices"):
+    if g.get("cuda_visible_devices") is not None:
         base_env["CUDA_VISIBLE_DEVICES"] = str(g["cuda_visible_devices"])
+
+    # Optional: pass through XLA_FLAGS (e.g. to work around nvlink issues)
+    if g.get("xla_flags"):
+        base_env["XLA_FLAGS"] = str(g["xla_flags"])
+
+    # Optional: force a particular JAX platform (e.g. "cpu" or "gpu")
+    if g.get("jax_platform_name"):
+        base_env["JAX_PLATFORM_NAME"] = str(g["jax_platform_name"])
+
+    # Optionally prefer pip-provided NVIDIA CUDA libs over any system toolkit.
+    # This helps avoid mismatches between driver/toolkit and jaxlib wheels.
+    use_pip_cuda_libs = g.get("use_pip_cuda_libs", True)
+    if use_pip_cuda_libs:
+        lib_dirs = _discover_nvidia_pip_lib_dirs()
+        if lib_dirs:
+            ld = base_env.get("LD_LIBRARY_PATH", "")
+            base_env["LD_LIBRARY_PATH"] = os.pathsep.join(lib_dirs + ([ld] if ld else []))
 
     for i, run in enumerate(runs, 1):
         argv = [sys.executable, "experiments/train.py"] + build_run_args(run, g)
@@ -172,4 +221,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

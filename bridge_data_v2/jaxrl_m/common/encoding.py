@@ -24,7 +24,16 @@ class EncodingWrapper(nn.Module):
     def __call__(self, observations: Dict[str, jnp.ndarray]) -> jnp.ndarray:
         encoding = self.encoder(observations["image"])
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = observations["proprio"]
+            # Flatten any time dimension on proprio (e.g., shape BxTxP -> Bx(T*P))
+            if proprio.ndim == encoding.ndim + 1 and proprio.shape[0] == encoding.shape[0]:
+                proprio = proprio.reshape((proprio.shape[0], -1))
+            elif proprio.ndim == encoding.ndim and proprio.shape[0] == encoding.shape[0]:
+                pass
+            else:
+                # Fallback: best-effort flatten to (B, -1)
+                proprio = proprio.reshape((proprio.shape[0], -1))
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)
         return encoding
@@ -87,7 +96,15 @@ class GCEncodingWrapper(nn.Module):
             )
 
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = observations["proprio"]
+            # Flatten any time dimension on proprio to align with encoding shape
+            if proprio.ndim == 3:  # (B, T, P)
+                proprio = rearrange(proprio, "B T P -> B (T P)")
+            elif proprio.ndim == 2:  # (B, P)
+                pass
+            else:
+                proprio = proprio.reshape((proprio.shape[0], -1))
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
 
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)
@@ -139,7 +156,14 @@ class LCEncodingWrapper(nn.Module):
             )
 
         if self.use_proprio:
-            encoding = jnp.concatenate([encoding, observations["proprio"]], axis=-1)
+            proprio = observations["proprio"]
+            if proprio.ndim == 3:
+                proprio = rearrange(proprio, "B T P -> B (T P)")
+            elif proprio.ndim == 2:
+                pass
+            else:
+                proprio = proprio.reshape((proprio.shape[0], -1))
+            encoding = jnp.concatenate([encoding, proprio], axis=-1)
 
         if self.stop_gradient:
             encoding = jax.lax.stop_gradient(encoding)

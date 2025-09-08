@@ -1,26 +1,34 @@
 global:
   # Paths
-  data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
-  save_dir: /data3/vla-reasoning/exp/bdv2_runs_0907
+  data_root: /scr/litian/dataset/bdv2_tfrecord
+  save_dir: /scr/litian/exp/bdv2_runs_0907
 
   # Training schedule
-  train_batch_size: 1500
-  val_batch_size: 501
-  num_steps: 20000
+  train_batch_size: 2000
+  val_batch_size: 500
+  num_steps: 50000
   eval_interval: 100
-  save_interval: 5000
+  save_interval: 50
   log_interval: 10
   warmup_steps: 1000
   # Optional: cap number of eval batches per eval (unset or integer)
   eval_batches: null
 
   # Default decay steps per algorithm (can override per-run)
-  decay_steps_bc: 20000
-  decay_steps_gc_bc: 20000
-  actor_decay_steps_gc_ddpm_bc: 20000
+  decay_steps_bc: 50000
+  decay_steps_gc_bc: 50000
+  actor_decay_steps_gc_ddpm_bc: 50000
 
   # Optional CUDA device list for spawned processes (string like "0,1")
-  cuda_visible_devices: "1,2,7"
+  cuda_visible_devices: "0,1,2,3"
+
+  # XLA flags to stabilize CUDA linking on diverse driver/toolkit combos
+  # This avoids nvlink API issues at the cost of slightly slower compilations.
+  xla_flags: "--xla_gpu_force_compilation_parallelism=1"
+
+  # Prefer pip-provided NVIDIA CUDA runtime libs (cuDNN/cuBLAS/NVJitLink)
+  # over any system CUDA toolkit found in PATH/LD_LIBRARY_PATH.
+  use_pip_cuda_libs: true
 
   # How to name runs; {algo} and {task} are available
   name_format: "{algo}_{task}"
@@ -32,8 +40,9 @@ global:
 
 # Either define an explicit run matrix...
 matrix:
-  algos: ["gc_bc", "gc_ddpm_bc"]
-  tasks: ["remove_pot_lid"]
+  algos: ["gc_ddpm_bc", "bc"]
+  tasks: ["lift_carrot_100", "lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100", "put_in_pot_lid_100"]
+
 
 # ...or define explicit runs (if provided, takes precedence over matrix)
 # runs:

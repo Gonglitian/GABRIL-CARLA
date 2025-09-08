@@ -1,4 +1,6 @@
 import os
+# Ensure TensorFlow runs strictly on CPU to avoid GPU lib conflicts with JAX
+os.environ.setdefault("TF_CUDA_VISIBLE_DEVICES", "")
 import json
 from functools import partial
 

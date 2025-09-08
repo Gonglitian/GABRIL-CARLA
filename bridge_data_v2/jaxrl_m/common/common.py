@@ -221,7 +221,7 @@ class JaxRLTrainState(struct.PyTreeNode):
 
     @classmethod
     def create(
-        cls, *, apply_fn, params, txs, target_params=None, rng=jax.random.PRNGKey(0)
+        cls, *, apply_fn, params, txs, target_params=None, rng=None
     ):
         """
         Initializes a new train state.
@@ -233,6 +233,8 @@ class JaxRLTrainState(struct.PyTreeNode):
             target_params: The target model parameters.
             rng: The rng key used to initialize the rng chain for `apply_loss_fns`.
         """
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
         return cls(
             step=0,
             apply_fn=apply_fn,

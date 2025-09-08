@@ -61,7 +61,7 @@ export CUDA_VISIBLE_DEVICES=$cuda_device
 # 生成随机seed函数
 generate_random_seeds() {
     local seeds=()
-    for i in {1..4}; do
+    for i in {1..2}; do
         # 生成0-999之间的随机数
         seed=$((RANDOM % 1000))
         seeds+=($seed)

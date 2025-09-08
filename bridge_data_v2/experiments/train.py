@@ -109,10 +109,12 @@ def main(_):
         sample_weights=FLAGS.bridgedata_config.sample_weights,
         **FLAGS.config.dataset_kwargs,
     )
+    # Allow a smaller eval batch if specified to avoid empty eval when val set is small
+    val_batch_size = getattr(FLAGS.config, "val_batch_size", FLAGS.config.batch_size)
     val_data = BridgeDataset(
         val_paths,
         FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
+        batch_size=val_batch_size,
         action_proprio_metadata=FLAGS.bridgedata_config.action_proprio_metadata,
         train=False,
         **FLAGS.config.dataset_kwargs,
@@ -180,11 +182,30 @@ def main(_):
             timer.tick("val")
             metrics = []
             val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
+
+            # Optionally cap the number of evaluation batches via config.eval_batches
+            max_eval_batches = getattr(FLAGS.config, "eval_batches", None)
+            # 将非正数视为不限制
+            try:
+                if max_eval_batches is not None and int(max_eval_batches) <= 0:
+                    max_eval_batches = None
+            except Exception:
+                pass
+            batches_seen = 0
             for batch in val_data_iter:
                 rng, val_rng = jax.random.split(rng)
                 metrics.append(agent.get_debug_metrics(batch, seed=val_rng))
-            metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-            wandb_logger.log({"validation": metrics}, step=i)
+                batches_seen += 1
+                if max_eval_batches is not None and batches_seen >= max_eval_batches:
+                    break
+
+            if len(metrics) == 0:
+                logging.warning(
+                    "No validation batches available (val set smaller than batch_size or empty). Skipping evaluation."
+                )
+            else:
+                metrics = jax.tree_util.tree_map(lambda *xs: np.mean(xs), *metrics)
+                wandb_logger.log({"validation": metrics}, step=i)
             timer.tock("val")
 
         if (i + 1) % FLAGS.config.save_interval == 0:

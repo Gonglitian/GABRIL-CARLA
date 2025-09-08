@@ -1,0 +1,50 @@
+global:
+  # Paths
+  data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
+  save_dir: /data3/vla-reasoning/exp/bdv2_runs_0907
+
+  # Training schedule
+  train_batch_size: 1500
+  val_batch_size: 501
+  num_steps: 20000
+  eval_interval: 100
+  save_interval: 5000
+  log_interval: 10
+  warmup_steps: 1000
+  # Optional: cap number of eval batches per eval (unset or integer)
+  eval_batches: null
+
+  # Default decay steps per algorithm (can override per-run)
+  decay_steps_bc: 20000
+  decay_steps_gc_bc: 20000
+  actor_decay_steps_gc_ddpm_bc: 20000
+
+  # Optional CUDA device list for spawned processes (string like "0,1")
+  cuda_visible_devices: "1,2,7"
+
+  # How to name runs; {algo} and {task} are available
+  name_format: "{algo}_{task}"
+
+  # Extra raw args appended to each run (list of strings)
+  extra_args:
+    - "--config.agent_kwargs.use_proprio"
+    - "True"
+
+# Either define an explicit run matrix...
+matrix:
+  algos: ["gc_bc", "gc_ddpm_bc"]
+  tasks: ["remove_pot_lid"]
+
+# ...or define explicit runs (if provided, takes precedence over matrix)
+# runs:
+#   - algo: bc
+#     task: remove_pot_lid
+#     name: custom_name_optional
+#     config_overrides:
+#       config.agent_kwargs.decay_steps: 200000
+#       config.batch_size: 800
+#     bridgedata_overrides:
+#       # Example: override bridgedata include/exclude in data_config
+#       # (use with caution; usually not needed)
+#       dummy: value
+#     extra_args: ["--debug"]

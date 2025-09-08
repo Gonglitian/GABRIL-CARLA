@@ -36,7 +36,7 @@ def calculate_route_average(method_name, seed=None, route_type="seen"):
     
     # 遍历所有route
     for route_id in routes:
-        route_path = Path(f"{method_name}/route_{route_id}")
+        route_path = Path(f"/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/runs/Mixed_/{method_name}/route_{route_id}")
         
         if not route_path.exists():
             if route_type == "seen":

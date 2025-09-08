@@ -4,9 +4,11 @@ from ml_collections import ConfigDict
 def get_config(config_string):
     base_real_config = dict(
         batch_size=256,
+        val_batch_size=256,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
+        eval_batches=0,  # <=0 表示不限制
         save_interval=5000,
         save_dir="path/to/save/dir",
         data_path="path/to/data",
@@ -16,7 +18,6 @@ def get_config(config_string):
 
     base_data_config = dict(
         shuffle_buffer_size=25000,
-        augment=True,
         augment_next_obs_goal_differently=False,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -60,6 +61,7 @@ def get_config(config_string):
                     goal_relabeling_strategy="uniform",
                     goal_relabeling_kwargs=dict(reached_proportion=0.1),
                     relabel_actions=True,
+                    augment=True,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -91,6 +93,7 @@ def get_config(config_string):
                     goal_relabeling_strategy="uniform",
                     goal_relabeling_kwargs=dict(reached_proportion=0.0),
                     relabel_actions=True,
+                    augment=True,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -123,6 +126,7 @@ def get_config(config_string):
                     relabel_actions=True,
                     load_language=True,
                     skip_unlabeled=True,
+                    augment=True,
                     **base_data_config,
                 ),
                 text_processor="muse_embedding",
@@ -162,6 +166,7 @@ def get_config(config_string):
                     relabel_actions=True,
                     obs_horizon=1,
                     act_pred_horizon=1,
+                    augment=True,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -204,6 +209,7 @@ def get_config(config_string):
                     goal_relabeling_strategy="uniform",
                     goal_relabeling_kwargs=dict(reached_proportion=0.0),
                     relabel_actions=True,
+                    augment=True,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -236,6 +242,7 @@ def get_config(config_string):
                     goal_relabeling_strategy="uniform",
                     goal_relabeling_kwargs=dict(reached_proportion=0.0),
                     relabel_actions=True,
+                    augment=True,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",

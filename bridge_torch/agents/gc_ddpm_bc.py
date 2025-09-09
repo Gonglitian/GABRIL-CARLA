@@ -13,49 +13,23 @@ import torch.nn.functional as F
 class MLP(nn.Module):
     def __init__(self, hidden_dims: Tuple[int, ...], activate_final: bool = False, dropout_rate: Optional[float] = None, use_layer_norm: bool = False):
         super().__init__()
-        layers = []
-        for i, h in enumerate(hidden_dims):
-            layers.append(nn.Linear(layers[-2].out_features if layers and isinstance(layers[-2], nn.Linear) else (hidden_dims[0] if i == 0 else hidden_dims[i-1]), h))
-            if i + 1 < len(hidden_dims) or activate_final:
+        layers: list[nn.Module] = []
+        last = hidden_dims[0]
+        for i, h in enumerate(hidden_dims[1:]):
+            layers.append(nn.Linear(last, h))
+            if i + 2 < len(hidden_dims) or activate_final:
                 if dropout_rate:
                     layers.append(nn.Dropout(dropout_rate))
                 if use_layer_norm:
                     layers.append(nn.LayerNorm(h))
                 layers.append(nn.SiLU())
-        # Rebuild with proper in_features for first layer
-        # The above construction is clumsy for dynamic; re-implement cleanly
-        self.net = nn.Sequential()
-        in_dim = hidden_dims[0]
-        # We'll build expecting caller to pass correct input dim via first element of hidden_dims
-        # To avoid confusion, we'll override in forward to pass through.
-        self.hidden_dims = hidden_dims
-        self.activate_final = activate_final
-        self.dropout_rate = dropout_rate
-        self.use_layer_norm = use_layer_norm
-
-        # Create after first forward when input dim known
-        self._built = False
-
-    def _build(self, in_dim: int):
-        layers = []
-        last = in_dim
-        for i, h in enumerate(self.hidden_dims):
-            layers.append(nn.Linear(last, h))
-            if i + 1 < len(self.hidden_dims) or self.activate_final:
-                if self.dropout_rate:
-                    layers.append(nn.Dropout(self.dropout_rate))
-                if self.use_layer_norm:
-                    layers.append(nn.LayerNorm(h))
-                layers.append(nn.SiLU())
             last = h
+        # 若只给了一个维度，表示恒等映射
+        if not layers:
+            layers.append(nn.Identity())
         self.net = nn.Sequential(*layers)
-        self._built = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self._built:
-            self._build(x.shape[-1])
-            # ensure dynamically built parameters are on the correct device
-            self.net = self.net.to(x.device)
         return self.net(x)
 
 
@@ -88,6 +62,7 @@ class MLPResNet(nn.Module):
         self.hidden_dim = hidden_dim
         self._built = False
 
+    @torch._dynamo.disable
     def _build(self, in_dim: int):
         # rebuild input projection and move to the same device as existing modules
         device = next(self.fc_out.parameters()).device if any(True for _ in self.fc_out.parameters()) else None
@@ -147,10 +122,9 @@ class ScoreActorTorch(nn.Module):
     def _encode(self, observations: Dict[str, torch.Tensor], goals: Dict[str, torch.Tensor]) -> torch.Tensor:
         zo = self.obs_encoder(observations["image"])  # (B, D)
         if self.goal_encoder is None:
-            # early concat case: assume obs image already concatenated with goal in channel dim?
-            # In our setup, we simply use obs encoder; keep zo as is.
-            zg = torch.zeros_like(zo)
-            z = torch.cat([zo, zg], dim=-1) if self.early else zo
+            # 共享编码器场景：直接用同一个 obs_encoder 对目标图进行编码，避免模块双注册
+            zg = self.obs_encoder(goals["image"]) if (goals is not None and "image" in goals) else torch.zeros_like(zo)
+            z = torch.cat([zo, zg], dim=-1) if self.early else (zo + zg)
         else:
             zg = self.goal_encoder(goals["image"])  # (B, D')
             z = torch.cat([zo, zg], dim=-1) if self.early else (zo + zg)
@@ -205,8 +179,11 @@ def build_ddpm_policy(
     action_seq_shape: Tuple[int, int],
     device: torch.device,
     use_proprio: bool = False,
+    proprio_feature_dim: int = 0,
 ) -> ScoreActorTorch:
-    time_pre = FourierFeatures(time_dim, learnable=True).to(device)
+    # 注意：FourierFeatures 最终输出维度等于其构造参数 output_size；
+    # 为了让 cond_enc 接收 2*time_dim 的输入，这里设为 2*time_dim
+    time_pre = FourierFeatures(2 * time_dim, learnable=True).to(device)
     cond_enc = MLP((2 * time_dim, time_dim), activate_final=False).to(device)
     rev_net = MLPResNet(num_blocks=num_blocks, out_dim=action_seq_shape[0] * action_seq_shape[1], dropout_rate=dropout_rate, use_layer_norm=use_layer_norm, hidden_dim=hidden_dim).to(device)
     policy = ScoreActorTorch(
@@ -219,6 +196,19 @@ def build_ddpm_policy(
         action_seq_shape,
         use_proprio=use_proprio,
     )
+    # 预构建 reverse_network 的输入维度，避免首次前向在 compile 图中动态重建
+    try:
+        obs_dim = int(getattr(obs_encoder, "_feat_dim"))
+        goal_dim = int(getattr(goal_encoder, "_feat_dim")) if goal_encoder is not None else obs_dim
+        enc_dim = (obs_dim + goal_dim) if early_goal_concat else obs_dim
+        # cond_enc 输出维度为 time_dim
+        cond_dim = time_dim
+        action_flat = int(action_seq_shape[0] * action_seq_shape[1])
+        total_in = cond_dim + enc_dim + int(proprio_feature_dim) + action_flat
+        rev_net._build(total_in)
+    except Exception:
+        # 安全降级：若无法获知特征维度，则交由首次前向构建
+        pass
     return policy.to(device)
 
 
@@ -243,7 +233,10 @@ class GCDDPMBCAgent:
         self.device = device
         self.step = 0
         self._action_T, self._action_A = policy.action_seq_shape
-        self.target_model: Optional[ScoreActorTorch] = None
+        # 提前初始化 target_model，避免对已编译模型进行 deepcopy
+        self.target_model: ScoreActorTorch = _copy.deepcopy(self.model).to(self.device)
+        for p in self.target_model.parameters():
+            p.requires_grad_(False)
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=cfg.learning_rate)
         # Scheduler selectable via config (actor path)
@@ -319,13 +312,8 @@ class GCDDPMBCAgent:
         self.optimizer.step()
         if self.scheduler is not None:
             self.scheduler.step()
-        # Initialize or update target network
-        if self.target_model is None:
-            self.target_model = _copy.deepcopy(self.model).to(self.device)
-            for p in self.target_model.parameters():
-                p.requires_grad_(False)
-        else:
-            self._polyak_update(self.cfg.target_update_rate)
+        # Update target network
+        self._polyak_update(self.cfg.target_update_rate)
         self.step += 1
 
         info = {

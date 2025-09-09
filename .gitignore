@@ -28,3 +28,4 @@ docs/
 temp.ipynb
 *.log
 *.egg-info
+*.txt

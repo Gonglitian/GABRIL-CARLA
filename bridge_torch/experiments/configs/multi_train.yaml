@@ -1,9 +1,7 @@
 # Torch multi-run example
 # python bridge_torch/experiments/multi_train.py --config bridge_torch/experiments/configs/multi_train.yaml
-# nohup python bridge_torch/experiments/multi_train.py \
-  # --config bridge_torch/experiments/configs/multi_train.yaml \
-  # > log.txt 2>&1 &
-  
+# nohup python bridge_torch/experiments/multi_train.py --config bridge_torch/experiments/configs/multi_train.yaml > log.txt 2>&1 &
+# important: gc_ddpm can't use compile
 matrix:
   algos: ["gc_ddpm_bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
   tasks: ["lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100", "put_in_pot_lid_100"]  # 可改为以下任一 data_config 任务：
@@ -46,7 +44,7 @@ global:
   actor_decay_steps_gc_ddpm_bc: 10000
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "0,1,3,4"
+  cuda_visible_devices: "0,1,3,5"
 
   name_format: "{algo}_{task}"
   extra_args:

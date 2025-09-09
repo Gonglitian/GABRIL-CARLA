@@ -11,10 +11,17 @@ warnings.filterwarnings(
     message=r"The epoch parameter in `scheduler\.step\(\)` was not necessary",
     category=UserWarning,
 )
+# 屏蔽 torch._sympy 的 pow_by_natural 相关告警（Dynamo 符号推理产生，非致命）
+warnings.filterwarnings(
+    "ignore",
+    message=r".*pow_by_natural.*",
+    category=UserWarning,
+)
 
 import numpy as np
 import torch
 from absl import app, flags, logging
+import logging as std_logging  # 标准 logging，用于控制 PyTorch 内部 logger 级别
 from ml_collections import config_flags
 from tqdm import tqdm
 
@@ -121,6 +128,12 @@ def main(_):
 
     # Suppress non-main process outputs and warnings
     warnings.filterwarnings("ignore", category=UserWarning, message=".*pow_by_natural.*")
+    # 进一步降低 PyTorch 内部 logger 的噪声
+    try:
+        std_logging.getLogger("torch.utils._sympy").setLevel(std_logging.ERROR)
+        std_logging.getLogger("torch._dynamo").setLevel(std_logging.ERROR)
+    except Exception:
+        pass
 
     if not is_main_process():
         # Disable wandb logging for non-main processes
@@ -243,15 +256,18 @@ def main(_):
     # Apply torch.compile if enabled (before DDP wrapping)
     compile_enabled = getattr(cfg, "compile", {}).get("enabled", False)
     compile_kwargs = getattr(cfg, "compile", {}).get("kwargs", {})
-    if compile_enabled and hasattr(torch, 'compile'):
+    # 在 DDP 激活时避免对子模块 encoder 进行独立编译，防止子模块共享导致的 Dynamo 冲突
+    if compile_enabled and hasattr(torch, 'compile') and not (ddp_enabled and ddp_active):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=UserWarning)
             enc = torch.compile(enc, **compile_kwargs)
         if is_main_process():
             logging.info("Encoder compiled with torch.compile")
+    elif compile_enabled and (ddp_enabled and ddp_active) and is_main_process():
+        logging.info("DDP active: skip compiling encoder; will compile full model instead")
     elif compile_enabled and not hasattr(torch, 'compile'):
-            if is_main_process():
-                logging.warning("torch.compile requested but not available (requires PyTorch >= 2.0)")
+        if is_main_process():
+            logging.warning("torch.compile requested but not available (requires PyTorch >= 2.0)")
 
     # Warm-up forward to initialize lazy shapes
     _ = enc(warmup_batch["observations"]["image"].to(device))
@@ -336,9 +352,10 @@ def main(_):
         # Expect action chunks (B, T, A); if absent, treat T=1
         act_shape = warmup_batch["actions"].shape
         action_seq_shape = act_shape[1:] if len(act_shape) == 3 else (1, act_shape[-1])
-        enc_goal = enc if cfg.agent_kwargs.get("shared_goal_encoder", True) else build_encoder(cfg.encoder, **cfg.encoder_kwargs).to(device)
+        # 共享目标编码器时，传入 None，在策略内部使用 obs_encoder 复用，避免模块双注册
+        enc_goal = None if cfg.agent_kwargs.get("shared_goal_encoder", True) else build_encoder(cfg.encoder, **cfg.encoder_kwargs).to(device)
         if goal_shape is not None:
-            _ = enc_goal(warmup_batch["goals"]["image"].to(device))
+            _ = (enc if enc_goal is None else enc_goal)(warmup_batch["goals"]["image"].to(device))
         # Build DDPM policy
         policy = build_ddpm_policy(
             obs_encoder=enc,
@@ -352,6 +369,7 @@ def main(_):
             action_seq_shape=tuple(action_seq_shape),
             device=device,
             use_proprio=cfg.agent_kwargs.get("use_proprio", False),
+            proprio_feature_dim=prop_dim,
         )
         agent = GCDDPMBCAgent(
             policy=policy,
@@ -370,15 +388,13 @@ def main(_):
             device=device,
         )
 
-        # Apply torch.compile to agent model if enabled
+        # Apply torch.compile to agent model if enabled（在 DDP 包装前执行）
         if compile_enabled and hasattr(torch, 'compile'):
-            # For DDP compatibility, compile before wrapping
-            if not ddp_enabled:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", category=UserWarning)
-                    agent.model = torch.compile(agent.model, **compile_kwargs)
-                if is_main_process():
-                    logging.info("Agent model compiled with torch.compile")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                agent.model = torch.compile(agent.model, **compile_kwargs)
+            if is_main_process():
+                logging.info("GC-DDPM Agent model compiled with torch.compile")
     else:
         raise ValueError(f"Unsupported torch agent: {cfg.agent}")
 

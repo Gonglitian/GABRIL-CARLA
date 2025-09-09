@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+import json
+import argparse
+from datetime import datetime
+from collections import deque
+from typing import Dict, Tuple, Optional
+
+import numpy as np
+import torch
+import cv2
+from PIL import Image
+import imageio
+
+from .widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
+
+from bridge_torch.models.encoders import build_encoder
+from bridge_torch.agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC
+from bridge_torch.agents.gc_bc import GCBCAgent, GCBCConfig, MLP as MLP_GC
+from bridge_torch.agents.gc_ddpm_bc import GCDDPMBCAgent, GCDDPMConfig, build_ddpm_policy
+
+from .utils import state_to_eep, stack_obs
+
+
+STEP_DURATION = 0.2
+NO_PITCH_ROLL = False
+NO_YAW = False
+STICKY_GRIPPER_NUM_STEPS = 1
+WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
+CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
+FIXED_STD = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ENV_PARAMS = {
+    "camera_topics": CAMERA_TOPICS,
+    "override_workspace_boundaries": WORKSPACE_BOUNDS,
+    "move_duration": STEP_DURATION,
+}
+
+
+def _prep_device(arg: str) -> torch.device:
+    if arg == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def _load_config_and_ckpt(save_dir: str) -> Tuple[Dict, str]:
+    cfg_path = os.path.join(save_dir, "config.json")
+    if not os.path.isfile(cfg_path):
+        raise FileNotFoundError(f"config.json not found in {save_dir}")
+    with open(cfg_path, "r") as f:
+        config = json.load(f)
+    # find latest ckpt_*.pt
+    ckpts = [p for p in os.listdir(save_dir) if p.startswith("ckpt_") and p.endswith(".pt")]
+    if not ckpts:
+        raise FileNotFoundError(f"No checkpoints in {save_dir}")
+    # sort by step number
+    def _step(p: str) -> int:
+        try:
+            return int(p.split("_")[-1].split(".")[0])
+        except Exception:
+            return -1
+    ckpts.sort(key=_step)
+    ckpt_path = os.path.join(save_dir, ckpts[-1])
+    return config, ckpt_path
+
+
+def _load_policy(save_dir: str, device: torch.device, im_size: int):
+    """Load one policy from save_dir and return a registry dict."""
+    cfg, ckpt_path = _load_config_and_ckpt(save_dir)
+    # build agent/model
+    agent, kind, obs_horizon, act_pred_horizon = _build_agent_from_config(cfg, device, im_size)
+    # load action metadata
+    action_proprio_metadata = cfg.get("bridgedata_config", {}).get("action_proprio_metadata")
+    action_mean = np.array(action_proprio_metadata["action"]["mean"]) if action_proprio_metadata else np.zeros(7, dtype=np.float32)
+    action_std = np.array(action_proprio_metadata["action"]["std"]) if action_proprio_metadata else np.ones(7, dtype=np.float32)
+    # hydrate agent weights, stripping compiled prefixes like "_orig_mod."
+    payload = torch.load(ckpt_path, map_location=device)
+    model_to_load = agent.model.module if hasattr(agent.model, "module") else agent.model
+    state = payload["model"]
+    try:
+        # remove any occurrence(s) of "_orig_mod." in keys
+        state = {k.replace("_orig_mod.", ""): v for k, v in state.items()}
+    except Exception:
+        pass
+    model_to_load.load_state_dict(state, strict=False)  # type: ignore
+    # make display name
+    name = os.path.basename(save_dir.rstrip("/"))
+    return {
+        "name": name,
+        "agent": agent,
+        "kind": kind,
+        "action_mean": action_mean,
+        "action_std": action_std,
+        "obs_horizon": obs_horizon,
+        "act_pred_horizon": act_pred_horizon,
+    }
+
+
+def _discover_runs(root_dir: str) -> list:
+    """Discover valid run directories under root_dir (one level).
+    A valid run dir contains config.json and at least one ckpt_*.pt
+    """
+    if not os.path.isdir(root_dir):
+        return []
+    runs = []
+    for name in sorted(os.listdir(root_dir)):
+        p = os.path.join(root_dir, name)
+        if not os.path.isdir(p):
+            continue
+        cfg_ok = os.path.isfile(os.path.join(p, "config.json"))
+        if not cfg_ok:
+            continue
+        has_ckpt = any(f.startswith("ckpt_") and f.endswith(".pt") for f in os.listdir(p))
+        if has_ckpt:
+            runs.append(p)
+    return runs
+
+
+def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
+    algo = cfg["agent"]
+    enc = build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
+
+    # dummy shapes from dataset config
+    ds_kwargs = cfg.get("dataset_kwargs", {})
+    obs_horizon = int(ds_kwargs.get("obs_horizon", 1))
+    act_pred_horizon = int(ds_kwargs.get("act_pred_horizon", 1))
+
+    # we will infer action_dim from bridgedata_config metadata
+    bd_meta = cfg.get("bridgedata_config", {}).get("action_proprio_metadata", {})
+    act_mean = np.array(bd_meta.get("action", {}).get("mean")) if bd_meta else None
+    if act_mean is None:
+        action_dim = 7
+    else:
+        action_dim = int(len(act_mean))
+
+    # Warmup to set encoder feature dim (use im_size from args)
+    dummy_image = torch.zeros(1, 3 * obs_horizon, im_size, im_size, device=device)
+    _ = enc(dummy_image)
+    enc_feat = int(getattr(enc, "_feat_dim"))
+    use_proprio = bool(cfg.get("agent_kwargs", {}).get("use_proprio", False))
+    prop_dim = 0
+    if use_proprio:
+        prop_dim = 7  # conservative default; not heavily used at eval time
+
+    if algo == "bc":
+        mlp = MLP_BC(input_dim=enc_feat + prop_dim)
+        model = __import__("bridge_torch.agents.bc", fromlist=["GaussianPolicy"]).GaussianPolicy(
+            enc,
+            mlp,
+            action_dim=action_dim,
+            use_proprio=use_proprio,
+            **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
+        )
+        agent = BCAgent(
+            model=model,
+            cfg=BCAgentConfig(
+                network_kwargs=cfg.get("agent_kwargs", {}).get("network_kwargs", {}),
+                policy_kwargs=cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
+                use_proprio=use_proprio,
+                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
+                weight_decay=cfg.get("agent_kwargs", {}).get("weight_decay", 0.0),
+                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
+                decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
+            ),
+            action_dim=action_dim,
+            device=device,
+        )
+        get_action_kind = "bc"
+    elif algo == "gc_bc":
+        enc_goal = None if cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True) else build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
+        if enc_goal is None:
+            _ = enc(dummy_image)
+        mlp = MLP_GC(input_dim=(enc_feat + (enc_feat if enc_goal is None else int(getattr(enc_goal, "_feat_dim"))) + prop_dim), **cfg.get("agent_kwargs", {}).get("network_kwargs", {}))
+        model = __import__("bridge_torch.agents.gc_bc", fromlist=["GCBCPolicy"]).GCBCPolicy(
+            obs_encoder=enc,
+            goal_encoder=enc_goal,
+            mlp=mlp,
+            action_dim=action_dim,
+            early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", True),
+            use_proprio=use_proprio,
+            **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
+        )
+        agent = GCBCAgent(
+            model=model,
+            cfg=GCBCConfig(
+                network_kwargs=cfg.get("agent_kwargs", {}).get("network_kwargs", {}),
+                policy_kwargs=cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
+                early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", True),
+                shared_goal_encoder=cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True),
+                use_proprio=use_proprio,
+                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
+                weight_decay=cfg.get("agent_kwargs", {}).get("weight_decay", 0.0),
+                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
+                decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
+            ),
+            action_dim=action_dim,
+            device=device,
+        )
+        get_action_kind = "gc_bc"
+    elif algo == "gc_ddpm_bc":
+        enc_goal = None if cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True) else build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
+        # Build DDPM policy
+        policy = build_ddpm_policy(
+            obs_encoder=enc,
+            goal_encoder=enc_goal,
+            early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", False),
+            time_dim=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("time_dim", 32),
+            num_blocks=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("num_blocks", 3),
+            dropout_rate=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("dropout_rate", 0.1),
+            hidden_dim=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("hidden_dim", 256),
+            use_layer_norm=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("use_layer_norm", True),
+            action_seq_shape=(act_pred_horizon, action_dim),
+            device=device,
+            use_proprio=use_proprio,
+            proprio_feature_dim=prop_dim,
+        )
+        agent = GCDDPMBCAgent(
+            policy=policy,
+            cfg=GCDDPMConfig(
+                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
+                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 2000),
+                actor_decay_steps=cfg.get("agent_kwargs", {}).get("actor_decay_steps", None),
+                beta_schedule=cfg.get("agent_kwargs", {}).get("beta_schedule", "cosine"),
+                diffusion_steps=cfg.get("agent_kwargs", {}).get("diffusion_steps", 20),
+                action_samples=cfg.get("agent_kwargs", {}).get("action_samples", 1),
+                repeat_last_step=cfg.get("agent_kwargs", {}).get("repeat_last_step", 0),
+                target_update_rate=cfg.get("agent_kwargs", {}).get("target_update_rate", 0.002),
+                action_min=-2.0,
+                action_max=2.0,
+            ),
+            device=device,
+        )
+        get_action_kind = "gc_ddpm_bc"
+    else:
+        raise ValueError(f"Unsupported torch agent: {algo}")
+
+    return agent, get_action_kind, obs_horizon, act_pred_horizon
+
+
+def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.ndarray, action_std: np.ndarray):
+    @torch.no_grad()
+    def get_action(obs: Dict[str, np.ndarray], goal_obs: Dict[str, np.ndarray]):
+        # convert to torch batch
+        def to_tensor_image(x: np.ndarray) -> torch.Tensor:
+            if x.ndim == 3 and x.shape[-1] == 3:
+                # HWC uint8 [0,255] -> CHW float [0,1]
+                t = torch.from_numpy(x).float().permute(2, 0, 1) / 255.0
+            elif x.ndim == 4 and x.shape[-1] == 3:
+                # THWC -> TCHW then stack as channels
+                t = torch.from_numpy(x).float().permute(0, 3, 1, 2) / 255.0
+                t = t.reshape(-1, t.shape[-2], t.shape[-1])  # (T*C,H,W) 不改变 H,W
+                # 需要在外部再添加 batch 维度
+                t = t
+            else:
+                t = torch.from_numpy(x).float()
+            return t
+
+        device = next(agent.model.parameters()).device
+        batch_obs: Dict[str, torch.Tensor] = {}
+
+        image = obs.get("image")
+        if image is not None:
+            img_t = to_tensor_image(image)
+            if img_t.dim() == 3:
+                img_t = img_t.unsqueeze(0)
+            batch_obs["image"] = img_t.to(device)
+        if "proprio" in obs and obs["proprio"] is not None:
+            prop = torch.from_numpy(obs["proprio"]).float().unsqueeze(0).to(device)
+            batch_obs["proprio"] = prop
+
+        batch_goal: Dict[str, torch.Tensor] = {}
+        if goal_obs is not None:
+            if "image" in goal_obs and goal_obs["image"] is not None:
+                gimg = to_tensor_image(goal_obs["image"])
+                if gimg.dim() == 3:
+                    gimg = gimg.unsqueeze(0)
+                batch_goal["image"] = gimg.to(device)
+            if "language" in goal_obs and goal_obs["language"] is not None:
+                # torch 版本未实现 language encoder，这里直接传占位（不支持 LC）
+                batch_goal["language"] = torch.from_numpy(goal_obs["language"]).float().unsqueeze(0).to(device)
+
+        if kind == "bc":
+            act = agent.sample_actions(batch_obs, argmax=deterministic)
+        elif kind == "gc_bc":
+            act = agent.sample_actions(batch_obs, batch_goal, argmax=deterministic)
+        else:
+            act_seq = agent.sample_actions(batch_obs, batch_goal)
+            act = act_seq[:, 0, :]  # 仅执行第一个时间步
+
+        action = act.squeeze(0).cpu().numpy()
+        action = action * action_std + action_mean
+        return action
+
+    return get_action
+
+
+def request_goal_image(image_goal: Optional[np.ndarray], widowx_client: WidowXClient, im_size: int) -> np.ndarray:
+    if image_goal is None:
+        ch = "y"
+    else:
+        ch = input("Taking a new goal? [y/n]")
+    if ch == "y":
+        widowx_client.move_gripper(1.0)
+        input("Press [Enter] when ready for taking the goal image. ")
+        obs = widowx_client.get_observation()
+        while obs is None:
+            print("WARNING retrying to get observation...")
+            obs = widowx_client.get_observation()
+            time.sleep(1)
+        image_goal = (
+            obs["image"].reshape(3, im_size, im_size).transpose(1, 2, 0) * 255
+        ).astype(np.uint8)
+    return image_goal
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Torch real-robot eval for WidowX")
+    parser.add_argument("--save_dir", type=str, nargs='+', default=None, help="One or more training run dirs that contain config.json and ckpt_*.pt")
+    parser.add_argument("--runs_root", type=str, default=None, help="Root dir containing multiple run subdirs; each subdir should contain config.json and ckpt_*.pt")
+    parser.add_argument("--goal_type", type=str, choices=["gc", "bc"], required=True, help="Goal type: gc (goal image) or bc (no goal)")
+    parser.add_argument("--im_size", type=int, required=True)
+    parser.add_argument("--video_save_path", type=str, default=None)
+    parser.add_argument("--goal_image_path", type=str, default=None)
+    parser.add_argument("--num_timesteps", type=int, default=120)
+    parser.add_argument("--blocking", action="store_true")
+    parser.add_argument("--goal_eep", type=float, nargs=3, default=[0.3, 0.0, 0.15])
+    parser.add_argument("--initial_eep", type=float, nargs=3, default=[0.3, 0.0, 0.15])
+    parser.add_argument("--act_exec_horizon", type=int, default=1)
+    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--ip", type=str, default="localhost")
+    parser.add_argument("--port", type=int, default=5556)
+    parser.add_argument("--show_image", action="store_true")
+    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--policy_index", type=int, default=None, help="Non-interactive: select which policy index to use when multiple are provided")
+    args = parser.parse_args()
+
+    device = _prep_device(args.device)
+
+    # build run dir list: from --save_dir and/or --runs_root
+    run_dirs = []
+    if args.save_dir:
+        run_dirs.extend(list(args.save_dir))
+    if args.runs_root:
+        discovered = _discover_runs(args.runs_root)
+        if not discovered:
+            print(f"[WARN] No valid runs discovered under {args.runs_root}")
+        run_dirs.extend(discovered)
+    if not run_dirs:
+        raise RuntimeError("Please provide --runs_root or --save_dir")
+
+    # First list candidates, then load only the selected policy to avoid heavy init
+    names = [os.path.basename(p.rstrip("/")) for p in run_dirs]
+    if len(names) == 1:
+        selected = 0
+    else:
+        if args.policy_index is not None:
+            selected = int(args.policy_index)
+            if selected < 0 or selected >= len(names):
+                raise ValueError(f"policy_index out of range: got {selected}, available [0..{len(names)-1}]")
+        else:
+            print("policies:")
+            for i, n in enumerate(names):
+                print(f"{i}) {n}")
+            selected = int(input("select policy: "))
+
+    # Load the selected policy only
+    picked = _load_policy(run_dirs[selected], device, args.im_size)
+
+    # build get_action wrapper for picked policy
+    get_action = _build_get_action(picked["agent"], picked["kind"], args.deterministic, picked["action_mean"], picked["action_std"])
+    obs_horizon = picked["obs_horizon"]
+    act_pred_horizon = picked["act_pred_horizon"]
+
+    # set up environment
+    env_params = WidowXConfigs.DefaultEnvParams.copy()
+    env_params.update(ENV_PARAMS)
+    env_params["state_state"] = list(np.concatenate([args.initial_eep, [0, 0, 0, 1]]))
+    widowx_client = WidowXClient(host=args.ip, port=args.port)
+    widowx_client.init(env_params, image_size=args.im_size)
+
+    # load goals
+    if args.goal_type == "gc":
+        image_goal = None
+        if args.goal_image_path is not None:
+            image_goal = np.array(Image.open(args.goal_image_path))
+    else:  # bc
+        image_goal = None
+
+    # reset env
+    widowx_client.reset()
+    time.sleep(2.5)
+
+    # move to initial position
+    if args.initial_eep is not None:
+        initial_eep = [float(e) for e in args.initial_eep]
+        eep = state_to_eep(initial_eep, 0)
+        widowx_client.move_gripper(1.0)
+        move_status = None
+        while move_status != WidowXStatus.SUCCESS:
+            move_status = widowx_client.move(eep, duration=1.5)
+
+    last_tstep = time.time()
+    images = []
+    image_goals = []
+    t = 0
+    obs_hist = deque(maxlen=obs_horizon) if (obs_horizon and obs_horizon > 1) else None
+    is_gripper_closed = False
+    num_consecutive_gripper_change_actions = 0
+
+    try:
+        # optionally request goal
+        if args.goal_type == "gc":
+            image_goal = request_goal_image(image_goal, widowx_client, args.im_size)
+            goal_obs = {"image": image_goal}
+            input("Press [Enter] to start.")
+        else:
+            goal_obs = {"image": np.zeros((args.im_size, args.im_size, 3), dtype=np.uint8)}
+            input("Press [Enter] to start BC evaluation.")
+
+        while t < args.num_timesteps:
+            if time.time() > last_tstep + STEP_DURATION or args.blocking:
+                obs = widowx_client.get_observation()
+                if obs is None:
+                    print("WARNING retrying to get observation...")
+                    continue
+
+                if args.show_image:
+                    bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
+                    cv2.imshow("img_view", bgr_img)
+                    cv2.waitKey(10)
+
+                image_obs = (
+                    obs["image"].reshape(3, args.im_size, args.im_size).transpose(1, 2, 0) * 255
+                ).astype(np.uint8)
+                curr = {"image": image_obs, "proprio": obs["state"]}
+                if obs_hist is not None:
+                    if len(obs_hist) == 0:
+                        obs_hist.extend([curr] * obs_hist.maxlen)
+                    else:
+                        obs_hist.append(curr)
+                    model_obs = stack_obs(list(obs_hist))
+                else:
+                    model_obs = curr
+
+                last_tstep = time.time()
+                actions = get_action(model_obs, goal_obs)
+                if actions.ndim == 1:
+                    actions = actions[None]
+                for i in range(args.act_exec_horizon):
+                    action = actions[i]
+                    action += np.random.normal(0, FIXED_STD)
+
+                    # sticky gripper logic
+                    if (action[-1] < 0.5) != is_gripper_closed:
+                        num_consecutive_gripper_change_actions += 1
+                    else:
+                        num_consecutive_gripper_change_actions = 0
+
+                    if num_consecutive_gripper_change_actions >= STICKY_GRIPPER_NUM_STEPS:
+                        is_gripper_closed = not is_gripper_closed
+                        num_consecutive_gripper_change_actions = 0
+
+                    action[-1] = 0.0 if is_gripper_closed else 1.0
+
+                    # remove degrees of freedom
+                    if NO_PITCH_ROLL:
+                        action[3] = 0
+                        action[4] = 0
+                    if NO_YAW:
+                        action[5] = 0
+
+                    widowx_client.step_action(action, blocking=args.blocking)
+
+                    images.append(image_obs)
+                    if args.goal_type == "gc":
+                        image_goals.append(image_goal)
+                    t += 1
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+
+    # save video
+    if args.video_save_path is not None:
+        os.makedirs(args.video_save_path, exist_ok=True)
+        curr_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_path = os.path.join(
+            args.video_save_path,
+            f"{curr_time}_torch_eval_sticky_{STICKY_GRIPPER_NUM_STEPS}.mp4",
+        )
+        if args.goal_type == "gc" and image_goals:
+            video = np.concatenate([np.stack(image_goals), np.stack(images)], axis=1)
+            imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
+        else:
+            imageio.mimsave(save_path, images, fps=1.0 / STEP_DURATION * 3)
+
+
+if __name__ == "__main__":
+    main()
+
+

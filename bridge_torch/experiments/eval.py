@@ -66,9 +66,25 @@ def _load_config_and_ckpt(save_dir: str) -> Tuple[Dict, str]:
     return config, ckpt_path
 
 
-def _load_policy(save_dir: str, device: torch.device, im_size: int):
+def _list_ckpts(save_dir: str) -> list:
+    ckpts = [p for p in os.listdir(save_dir) if p.startswith("ckpt_") and p.endswith(".pt")]
+    def _step(p: str) -> int:
+        try:
+            return int(p.split("_")[-1].split(".")[0])
+        except Exception:
+            return -1
+    ckpts.sort(key=_step)
+    return [os.path.join(save_dir, p) for p in ckpts]
+
+
+def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: Optional[str] = None):
     """Load one policy from save_dir and return a registry dict."""
-    cfg, ckpt_path = _load_config_and_ckpt(save_dir)
+    if ckpt_path is None:
+        cfg, ckpt_path = _load_config_and_ckpt(save_dir)
+    else:
+        cfg_path = os.path.join(save_dir, "config.json")
+        with open(cfg_path, "r") as f:
+            cfg = json.load(f)
     # build agent/model
     agent, kind, obs_horizon, act_pred_horizon = _build_agent_from_config(cfg, device, im_size)
     # load action metadata
@@ -95,6 +111,7 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int):
         "action_std": action_std,
         "obs_horizon": obs_horizon,
         "act_pred_horizon": act_pred_horizon,
+        "ckpt_path": ckpt_path,
     }
 
 
@@ -365,8 +382,28 @@ def main():
                 print(f"{i}) {n}")
             selected = int(input("select policy: "))
 
-    # Load the selected policy only
-    picked = _load_policy(run_dirs[selected], device, args.im_size)
+    # After selecting run, optionally select ckpt from that run
+    chosen_run = run_dirs[selected]
+    ckpt_files = _list_ckpts(chosen_run)
+    if not ckpt_files:
+        raise FileNotFoundError(f"No checkpoints in {chosen_run}")
+    if len(ckpt_files) == 1:
+        chosen_ckpt = ckpt_files[0]
+    else:
+        # show list and let user pick
+        print("checkpoints:")
+        for i, p in enumerate(ckpt_files):
+            print(f"{i}) {os.path.basename(p)}")
+        try:
+            ckpt_idx = int(input("select ckpt (default latest): ") or str(len(ckpt_files) - 1))
+        except Exception:
+            ckpt_idx = len(ckpt_files) - 1
+        if ckpt_idx < 0 or ckpt_idx >= len(ckpt_files):
+            ckpt_idx = len(ckpt_files) - 1
+        chosen_ckpt = ckpt_files[ckpt_idx]
+
+    # Load the selected policy with the chosen ckpt
+    picked = _load_policy(chosen_run, device, args.im_size, ckpt_path=chosen_ckpt)
 
     # build get_action wrapper for picked policy
     get_action = _build_get_action(picked["agent"], picked["kind"], args.deterministic, picked["action_mean"], picked["action_std"])
@@ -379,6 +416,17 @@ def main():
     env_params["state_state"] = list(np.concatenate([args.initial_eep, [0, 0, 0, 1]]))
     widowx_client = WidowXClient(host=args.ip, port=args.port)
     widowx_client.init(env_params, image_size=args.im_size)
+
+    # optional preview before requesting goal, for monitoring camera stream
+    if args.show_image:
+        obs = widowx_client.get_observation()
+        while obs is None:
+            print("Waiting for observations...")
+            obs = widowx_client.get_observation()
+            time.sleep(1)
+        bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
+        cv2.imshow("img_view", bgr_img)
+        cv2.waitKey(100)
 
     # load goals
     if args.goal_type == "gc":

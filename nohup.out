@@ -1,0 +1,467 @@
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+wandb: Currently logged in as: gltdd to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.21.3
+wandb: Run data is saved locally in /scr/litian/tmp/tmpks833she/wandb/run-20250909_191146-gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+wandb: ⭐️ View project at https://wandb.ai/gltdd/bridgedata_torch
+wandb: 🚀 View run at https://wandb.ai/gltdd/bridgedata_torch/runs/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+I0909 19:11:47.342231 140437107995712 train.py:177] Config saved to /scr/litian/torch_runs/bridgedata_torch/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+I0909 19:11:47.342570 140437107995712 train.py:179] WandB run initialized: https://wandb.ai/gltdd/bridgedata_torch/runs/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+I0909 19:11:56.377824 140437107995712 train.py:238] Obs batch shape: torch.Size([500, 3, 256, 256]), action_dim: 7, goal shape: torch.Size([500, 3, 256, 256])
+I0909 19:11:57.059885 140437107995712 train.py:251] Encoder compiled with torch.compile
+I0909 19:12:10.247146 140437107995712 train.py:381] Agent model compiled with torch.compile
+I0909 19:12:10.248446 140437107995712 train.py:411] AMP BF16 enabled (no GradScaler)
+Train:   0%|          | 0/10000 [00:00<?, ?it/s]Train:   0%|          | 0/10000 [00:03<?, ?it/s]
+wandb: updating run metadata
+wandb:                                                                                
+wandb: 🚀 View run gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146 at: https://wandb.ai/gltdd/bridgedata_torch/runs/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146
+wandb: ⭐️ View project at: https://wandb.ai/gltdd/bridgedata_torch
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: /scr/litian/tmp/tmpks833she/wandb/run-20250909_191146-gc_ddpm_bc_lift_carrot_100_confounded_20250909_191146/logs
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 524, in <module>
+    app.run(main)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 316, in run
+    _run_main(main, args)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 261, in _run_main
+    sys.exit(main(argv))
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 439, in main
+    info = agent.update(batch)
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 313, in update
+    eps_pred = self.model(obs, goal, noisy_actions, t_float)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 659, in _fn
+    raise e.with_traceback(None) from None
+torch._dynamo.exc.Unsupported: Workaround for issues with nn_parameter construction
+
+from user code:
+   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 169, in forward
+    cond_enc = self.cond_encoder(t_ff)
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 56, in forward
+    self._build(x.shape[-1])
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 43, in _build
+    layers.append(nn.Linear(last, h))
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/polyfills/__init__.py", line 156, in instantiate_user_defined_class_object
+    obj.__init__(*args, **kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 105, in __init__
+    self.weight = Parameter(
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank0]:     return _run_code(code, main_globals, None,
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 86, in _run_code
+[rank0]:     exec(code, run_globals)
+[rank0]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 524, in <module>
+[rank0]:     app.run(main)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 316, in run
+[rank0]:     _run_main(main, args)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 261, in _run_main
+[rank0]:     sys.exit(main(argv))
+[rank0]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 439, in main
+[rank0]:     info = agent.update(batch)
+[rank0]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 313, in update
+[rank0]:     eps_pred = self.model(obs, goal, noisy_actions, t_float)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 659, in _fn
+[rank0]:     raise e.with_traceback(None) from None
+[rank0]: torch._dynamo.exc.Unsupported: Workaround for issues with nn_parameter construction
+
+[rank0]: from user code:
+[rank0]:    File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 169, in forward
+[rank0]:     cond_enc = self.cond_encoder(t_ff)
+[rank0]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 56, in forward
+[rank0]:     self._build(x.shape[-1])
+[rank0]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 43, in _build
+[rank0]:     layers.append(nn.Linear(last, h))
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/polyfills/__init__.py", line 156, in instantiate_user_defined_class_object
+[rank0]:     obj.__init__(*args, **kwargs)
+[rank0]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 105, in __init__
+[rank0]:     self.weight = Parameter(
+
+[rank0]: Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank1]:     return _run_code(code, main_globals, None,
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 86, in _run_code
+[rank1]:     exec(code, run_globals)
+[rank1]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 524, in <module>
+[rank1]:     app.run(main)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 316, in run
+[rank1]:     _run_main(main, args)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/absl/app.py", line 261, in _run_main
+[rank1]:     sys.exit(main(argv))
+[rank1]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/train.py", line 439, in main
+[rank1]:     info = agent.update(batch)
+[rank1]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 313, in update
+[rank1]:     eps_pred = self.model(obs, goal, noisy_actions, t_float)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 659, in _fn
+[rank1]:     raise e.with_traceback(None) from None
+[rank1]: torch._dynamo.exc.Unsupported: Workaround for issues with nn_parameter construction
+
+[rank1]: from user code:
+[rank1]:    File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 169, in forward
+[rank1]:     cond_enc = self.cond_encoder(t_ff)
+[rank1]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 56, in forward
+[rank1]:     self._build(x.shape[-1])
+[rank1]:   File "/home/litian/proj/GABRIL-CARLA/bridge_torch/agents/gc_ddpm_bc.py", line 43, in _build
+[rank1]:     layers.append(nn.Linear(last, h))
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/_dynamo/polyfills/__init__.py", line 156, in instantiate_user_defined_class_object
+[rank1]:     obj.__init__(*args, **kwargs)
+[rank1]:   File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 105, in __init__
+[rank1]:     self.weight = Parameter(
+
+[rank1]: Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+W0909 19:12:20.696000 2906134 site-packages/torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGINT death signal, shutting down workers
+W0909 19:12:20.696000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906243 closing signal SIGINT
+W0909 19:12:20.696000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906244 closing signal SIGINT
+W0909 19:12:20.697000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906245 closing signal SIGINT
+W0909 19:12:20.697000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906246 closing signal SIGINT
+W0909 19:12:20.881000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906243 closing signal SIGTERM
+W0909 19:12:20.884000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906244 closing signal SIGTERM
+W0909 19:12:20.888000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906245 closing signal SIGTERM
+W0909 19:12:20.928000 2906134 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 2906246 closing signal SIGTERM
+[RUN 01/4] /scr/litian/envs/bridge_torch/bin/python -m torch.distributed.run --nproc_per_node 4 -m bridge_torch.experiments.train --name gc_ddpm_bc_lift_carrot_100_confounded --config bridge_torch/experiments/configs/train_config.py:gc_ddpm_bc --bridgedata_config bridge_torch/experiments/configs/data_config.py:lift_carrot_100_confounded --config.data_path /scr/litian/dataset/bdv2_numpy --config.save_dir /scr/litian/torch_runs --config.batch_size 2000 --config.val_batch_size 20 --config.num_steps 10000 --config.eval_interval 500 --config.save_interval 1000 --config.log_interval 10 --config.agent_kwargs.warmup_steps 500 --config.agent_kwargs.actor_decay_steps 10000 --config.dataset_kwargs.obs_horizon 1 --config.dataset_kwargs.act_pred_horizon 1 --config.dataset_kwargs.augment True --config.dataset_kwargs.augment_next_obs_goal_differently False --config.dataset_kwargs.augment_kwargs.random_resized_crop.scale '(0.8, 1.0)' --config.dataset_kwargs.augment_kwargs.random_resized_crop.ratio '(0.9, 1.1)' --config.dataset_kwargs.augment_kwargs.random_brightness '(0.2)' --config.dataset_kwargs.augment_kwargs.random_contrast '(0.8, 1.2)' --config.dataset_kwargs.augment_kwargs.random_saturation '(0.8, 1.2)' --config.dataset_kwargs.augment_kwargs.random_hue '(0.1)' --config.dataset_kwargs.augment_kwargs.augment_order '(random_resized_crop, random_brightness, random_contrast, random_saturation, random_hue)' --config.amp.enabled True --config.amp.dtype bf16 --config.amp.growth_factor 2.0 --config.amp.backoff_factor 0.5 --config.amp.growth_interval 2000 --config.compile.enabled True --config.compile.kwargs.mode default --config.compile.kwargs.dynamic False --config.compile.kwargs.fullgraph False --config.dataloader.num_workers 8 --config.dataloader.prefetch_factor 4 --config.dataloader.persistent_workers True --config.dataloader.pin_memory True --config.profiler.enabled False --config.profiler.wait 1 --config.profiler.warmup 1 --config.profiler.active 5 --config.profiler.repeat 1 --config.profiler.record_shapes True --config.profiler.with_stack False --config.scheduler.type warmup_cosine --config.wandb.project bridgedata_torch --config.agent_kwargs.use_proprio True
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1959, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1917, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/multi_train.py", line 188, in main
+    rc = proc.wait()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1222, in wait
+    self._wait(timeout=sigint_timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/multi_train.py", line 205, in <module>
+    main()
+  File "/home/litian/proj/GABRIL-CARLA/bridge_torch/experiments/multi_train.py", line 193, in main
+    proc.wait(timeout=10)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+    result = self._invoke_run(role)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 870, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2906134 got signal: 2
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2906134 got signal: 2
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 720, in run
+    self._shutdown(e.sigval)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 372, in _shutdown
+    self._pcontext.close(death_sig)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 577, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 912, in _close
+    handler.proc.wait(time_to_wait)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2906134 got signal: 15
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/run.py", line 896, in <module>
+    main()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/run.py", line 892, in main
+    run(args)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/run.py", line 883, in run
+    elastic_launch(
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 139, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 261, in launch_agent
+    result = agent.run()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 725, in run
+    self._shutdown()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 372, in _shutdown
+    self._pcontext.close(death_sig)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 577, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 912, in _close
+    handler.proc.wait(time_to_wait)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2906134 got signal: 2
+Exception ignored in atexit callback: <function _MultiProcessingDataLoaderIter._clean_up_worker at 0x7fe115056c20>
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1657, in _clean_up_worker
+    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/process.py", line 149, in join
+    res = self._popen.wait(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/popen_fork.py", line 40, in wait
+    if not wait([self.sentinel], timeout):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 931, in wait
+    ready = selector.select(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/selectors.py", line 416, in select
+    fd_event_list = self._selector.poll(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/signal_handling.py", line 73, in handler
+    _error_if_any_worker_fails()
+RuntimeError: DataLoader worker (pid 2908024) is killed by signal: Terminated. 
+[rank1]:[W909 19:12:21.162833062 TCPStore.cpp:125] [c10d] recvValue failed on SocketImpl(fd=15, addr=[localhost]:41186, remote=[localhost]:29500): failed to recv, got 0 bytes
+Exception raised from recvBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:678 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7fe1e07785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7fe1c9ed5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baaf40 (0x7fe1c9ed7f40 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5bab84a (0x7fe1c9ed884a in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x2a9 (0x7fe1c9ed22a9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7fe18b5d19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7fe1e3ed6bf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7fe1e675fb43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7fe1e67f1a00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank1]:[W909 19:12:21.167043902 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 1] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: failed to recv, got 0 bytes
+Exception in thread Thread-4 (_pin_memory_loop):
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 61, in _pin_memory_loop
+    do_one_step()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 37, in do_one_step
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/multiprocessing/reductions.py", line 541, in rebuild_storage_fd
+    fd = df.detach()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 86, in get_connection
+    c = Client(address, authkey=process.current_process().authkey)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 508, in Client
+    answer_challenge(c, authkey)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 752, in answer_challenge
+    message = connection.recv_bytes(256)         # reject large message
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 216, in recv_bytes
+    buf = self._recv_bytes(maxlength)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 414, in _recv_bytes
+    buf = self._recv(4)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 379, in _recv
+    chunk = read(handle, remaining)
+ConnectionResetError: [Errno 104] Connection reset by peer
+[rank3]:[W909 19:12:21.450231771 TCPStore.cpp:125] [c10d] recvValue failed on SocketImpl(fd=15, addr=[localhost]:41196, remote=[localhost]:29500): failed to recv, got 0 bytes
+Exception raised from recvBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:678 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7f3b5ab785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7f3b442d5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baaf40 (0x7f3b442d7f40 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5bab84a (0x7f3b442d884a in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x2a9 (0x7f3b442d22a9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7f3b059d19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7f3b5e33fbf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7f3b60bc8b43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7f3b60c5aa00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank3]:[W909 19:12:21.453868640 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 3] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: failed to recv, got 0 bytes
+[rank2]:[W909 19:12:21.471581724 TCPStore.cpp:125] [c10d] recvValue failed on SocketImpl(fd=15, addr=[localhost]:41198, remote=[localhost]:29500): failed to recv, got 0 bytes
+Exception raised from recvBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:678 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7fc6a2d785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7fc68c4d5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baaf40 (0x7fc68c4d7f40 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5bab84a (0x7fc68c4d884a in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x2a9 (0x7fc68c4d22a9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7fc64dbd19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7fc6a64cbbf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7fc6a8d54b43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7fc6a8de6a00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank2]:[W909 19:12:21.480396386 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 2] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: failed to recv, got 0 bytes
+[rank0]:[W909 19:12:21.505055777 TCPStore.cpp:125] [c10d] recvValue failed on SocketImpl(fd=15, addr=[localhost]:41204, remote=[localhost]:29500): failed to recv, got 0 bytes
+Exception raised from recvBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:678 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7fba09f785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7fb9f36d5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baaf40 (0x7fb9f36d7f40 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5bab84a (0x7fb9f36d884a in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x2a9 (0x7fb9f36d22a9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7fb9b4dd19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7fba0d703bf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7fba0ff8cb43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7fba1001ea00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank0]:[W909 19:12:21.508513745 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 0] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: failed to recv, got 0 bytes
+Exception ignored in atexit callback: <function _MultiProcessingDataLoaderIter._clean_up_worker at 0x7fb93e856c20>
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1657, in _clean_up_worker
+    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/process.py", line 149, in join
+    res = self._popen.wait(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/popen_fork.py", line 40, in wait
+    if not wait([self.sentinel], timeout):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 931, in wait
+    ready = selector.select(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/selectors.py", line 416, in select
+    fd_event_list = self._selector.poll(timeout)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/signal_handling.py", line 73, in handler
+    _error_if_any_worker_fails()
+RuntimeError: DataLoader worker (pid 2907830) is killed by signal: Terminated. 
+Exception in thread Thread-4 (_pin_memory_loop):
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 61, in _pin_memory_loop
+    do_one_step()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 37, in do_one_step
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/multiprocessing/reductions.py", line 541, in rebuild_storage_fd
+    fd = df.detach()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 86, in get_connection
+    c = Client(address, authkey=process.current_process().authkey)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 508, in Client
+    answer_challenge(c, authkey)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 752, in answer_challenge
+    message = connection.recv_bytes(256)         # reject large message
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 216, in recv_bytes
+    buf = self._recv_bytes(maxlength)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 414, in _recv_bytes
+    buf = self._recv(4)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 379, in _recv
+    chunk = read(handle, remaining)
+ConnectionResetError: [Errno 104] Connection reset by peer
+Fatal Python error: Aborted
+
+Thread 0x00007fc6a8cbf440 (most recent call first):
+  <no Python frame>
+
+Extension modules: numpy._core._multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, yaml._yaml, PIL._imaging, PIL._imagingft, av._core, av.logging, av.bytesource, av.buffer, av.audio.format, av.error, av.dictionary, av.container.pyio, av.utils, av.option, av.descriptor, av.format, av.stream, av.container.streams, av.sidedata.motionvectors, av.sidedata.sidedata, av.opaque, av.packet, av.container.input, av.container.output, av.container.core, av.codec.context, av.video.format, av.video.reformatter, av.plane, av.video.plane, av.video.frame, av.video.stream, av.codec.hwaccel, av.codec.codec, av.frame, av.audio.layout, av.audio.plane, av.audio.frame, av.audio.stream, av.filter.link, av.filter.context, av.filter.graph, av.filter.filter, av.filter.loudnorm, av.audio.resampler, av.audio.codeccontext, av.audio.fifo, av.bitstream, av.video.codeccontextException in thread Thread-5 (_pin_memory_loop):
+Traceback (most recent call last):
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox    , numpy.random._pcg64self.run(), numpy.random._sfc64
+, numpy.random._generator  File "/scr/litian/envs/bridge_torch/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 61, in _pin_memory_loop
+    do_one_step()
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 37, in do_one_step
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/multiprocessing/reductions.py", line 541, in rebuild_storage_fd
+    , simsimdfd = df.detach()
+, stringzilla  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/resource_sharer.py", line 86, in get_connection
+, charset_normalizer.md    c = Client(address, authkey=process.current_process().authkey)
+, requests.packages.charset_normalizer.md  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 508, in Client
+, requests.packages.chardet.md,     scipy._lib._ccallback_canswer_challenge(c, authkey)
+, scipy.special._ufuncs_cxx  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 752, in answer_challenge
+, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.linalg._fblas    , scipy.linalg._flapackmessage = connection.recv_bytes(256)         # reject large message
+, scipy.linalg.cython_lapack  File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 216, in recv_bytes
+, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._decomp_lu_cython    , buf = self._recv_bytes(maxlength)scipy.linalg._matfuncs_sqrtm_triu
+,   File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 414, in _recv_bytes
+scipy.linalg._matfuncs_expm, scipy.linalg._linalg_pythran, scipy.linalg.cython_blas, scipy.linalg._decomp_update, scipy.sparse._sparsetools    , buf = self._recv(4)_csparsetools
+,   File "/scr/litian/envs/bridge_torch/lib/python3.10/multiprocessing/connection.py", line 379, in _recv
+scipy.sparse._csparsetools, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpack, scipy.sparse.linalg._propack._spropack    , scipy.sparse.linalg._propack._dpropackchunk = read(handle, remaining), 
+scipy.sparse.linalg._propack._cpropack, scipy.sparse.linalg._propack._zpropackConnectionResetError: , [Errno 104] Connection reset by peerscipy.sparse.csgraph._tools
+, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy.special._ellip_harm_2, google._upb._message, markupsafe._speedups, cuda_utils, __triton_launcher (total: 112)
+[rank1]:[W909 19:12:22.167270102 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=15, addr=[localhost]:41186, remote=[localhost]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7fe1e07785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7fe1c9ed5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baa458 (0x7fe1c9ed7458 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5babc3e (0x7fe1c9ed8c3e in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x298 (0x7fe1c9ed2298 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7fe18b5d19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7fe1e3ed6bf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7fe1e675fb43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7fe1e67f1a00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank1]:[W909 19:12:22.173726097 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 1] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: Broken pipe
+[rank0]:[W909 19:12:22.508918055 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=15, addr=[localhost]:41204, remote=[localhost]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x98 (0x7fba09f785e8 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5ba8bfe (0x7fb9f36d5bfe in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5baa458 (0x7fb9f36d7458 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5babc3e (0x7fb9f36d8c3e in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::check(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&) + 0x298 (0x7fb9f36d2298 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::ProcessGroupNCCL::heartbeatMonitor() + 0x379 (0x7fb9b4dd19f9 in /scr/litian/envs/bridge_torch/lib/python3.10/site-packages/torch/lib/libtorch_cuda.so)
+frame #6: <unknown function> + 0xdbbf4 (0x7fba0d703bf4 in /scr/litian/envs/bridge_torch/bin/../lib/libstdc++.so.6)
+frame #7: <unknown function> + 0x94b43 (0x7fba0ff8cb43 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #8: <unknown function> + 0x126a00 (0x7fba1001ea00 in /lib/x86_64-linux-gnu/libc.so.6)
+
+[rank0]:[W909 19:12:22.515122680 ProcessGroupNCCL.cpp:1662] [PG ID 0 PG GUID 0 Rank 0] Failed to check the "should dump" flag on TCPStore, (maybe TCPStore server has shut down too early), with error: Broken pipe
+[rank0]:[W909 19:12:22.576400022 ProcessGroupNCCL.cpp:1479] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+wandb: Currently logged in as: gltdd to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.21.3
+wandb: Run data is saved locally in /scr/litian/tmp/tmp3_htodtk/wandb/run-20250909_191321-gc_ddpm_bc_lift_carrot_100_confounded_20250909_191321
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run gc_ddpm_bc_lift_carrot_100_confounded_20250909_191321
+wandb: ⭐️ View project at https://wandb.ai/gltdd/bridgedata_torch
+wandb: 🚀 View run at https://wandb.ai/gltdd/bridgedata_torch/runs/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191321
+I0909 19:13:22.496047 140334661514304 train.py:177] Config saved to /scr/litian/torch_runs/bridgedata_torch/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191321
+I0909 19:13:22.496640 140334661514304 train.py:179] WandB run initialized: https://wandb.ai/gltdd/bridgedata_torch/runs/gc_ddpm_bc_lift_carrot_100_confounded_20250909_191321
+I0909 19:13:31.083472 140334661514304 train.py:238] Obs batch shape: torch.Size([500, 3, 256, 256]), action_dim: 7, goal shape: torch.Size([500, 3, 256, 256])
+I0909 19:13:31.810743 140334661514304 train.py:251] Encoder compiled with torch.compile

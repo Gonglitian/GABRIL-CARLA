@@ -6,11 +6,7 @@ from typing import Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-try:
-    from vlm_gaze.data_utils.gaze_utils import get_gaze_mask
-except Exception:
-    get_gaze_mask = None  # optional dependency
-
+from bridge_torch.common.gaze import get_gaze_mask
 
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dims=(256, 256, 256), dropout_rate=0.0, activate_final=True):
@@ -117,16 +113,27 @@ class BCAgent:
         self.step = 0
 
         # Saliency-variant config (optional, from YAML)
-        # prefer nested under policy_kwargs to avoid dataclass ctor issues
+        # tolerate ml_collections.ConfigDict or plain dict
         sal_cfg = {}
         try:
-            if hasattr(cfg, "policy_kwargs") and isinstance(cfg.policy_kwargs, dict):
-                sal_cfg = dict(cfg.policy_kwargs.get("saliency", {}) or {})
+            pk = getattr(cfg, "policy_kwargs", {}) or {}
+            if hasattr(pk, "to_dict"):
+                pk = pk.to_dict()
+            elif not isinstance(pk, dict):
+                try:
+                    pk = dict(pk)
+                except Exception:
+                    pk = {}
+            sal_cfg = dict(pk.get("saliency", {}) or {})
             if not sal_cfg:
-                sal_cfg = getattr(cfg, "saliency", {}) or {}
+                direct = getattr(cfg, "saliency", {}) or {}
+                if hasattr(direct, "to_dict"):
+                    sal_cfg = direct.to_dict()
+                elif isinstance(direct, dict):
+                    sal_cfg = dict(direct)
         except Exception:
-            sal_cfg = getattr(cfg, "saliency", {}) or {}
-        self._saliency_enabled = bool(sal_cfg.get("enabled", False))
+            sal_cfg = {}
+        self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
         self._saliency_weight = float(sal_cfg.get("weight", 1.0))
         self._saliency_beta = float(sal_cfg.get("beta", 1.0))
         self._last_spatial = None
@@ -155,17 +162,21 @@ class BCAgent:
         actor_loss = -log_prob.mean()
         reg_loss = torch.tensor(0.0, device=self.device)
         # Saliency regularization (Reg variant)
-        if self._saliency_enabled and (get_gaze_mask is not None) and ("saliency" in obs):
+        if self._saliency_enabled and ("saliency" in obs):
             try:
                 z_map = self._last_spatial  # (B,C,Hf,Wf)
+                print("zmap", z_map)
                 self._last_spatial = None  # reset for next step
                 if z_map is not None and z_map.dim() == 4:
                     target = obs["saliency"]  # (B,1,H,W)
+                    print("target", target)
                     H, W = int(target.shape[-2]), int(target.shape[-1])
                     pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))  # (B,1,H,W)
+                    print("pred", pred)
                     reg_loss = F.mse_loss(pred, target)
-            except Exception:
-                pass
+                    print("reg_loss", reg_loss)
+            except Exception as e:
+                print(e)
         loss = actor_loss + self._saliency_weight * reg_loss
         with torch.no_grad():
             mse = F.mse_loss(out["mu"], actions, reduction="none").sum(-1).mean()

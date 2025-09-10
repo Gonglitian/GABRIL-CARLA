@@ -25,8 +25,8 @@ run:
 
 stages:
   global_desc: false
-  vlm_filter: true
-  bbox_to_dataset: false
+  vlm_filter: false
+  bbox_to_dataset: true
 
 processing:
   seed: 42
@@ -168,16 +168,18 @@ vlm_filter:
 
 bbox_to_dataset:
   overwrite: true
+  bdv2:
+  # saliency_map 的文件名与 sigma 在此处配置
+  saliency:
+    output_name: "saliency_map.pkl"
+    sigma: 20
   # If omitted, will fall back to vlm_filter.output.base_output_dir
   saliency_results_dir: "/data3/vla-reasoning/bdv2_saliency_filter_results"
   filenames:
     grounding_detections: "grounding_detections.json"
     vlm_filtered_boxes: "vlm_filtered_boxes.json"
-    non_filter_pt: "non_filter.pt" # no use in bdv2
-    filter_dynamic_pt: "filter_dynamic.pt" # no use in bdv2
-  pkl_filenames:
-    no_filter: "no_filter.pkl" # from grounding_detections.json
-    filter: "filter.pkl" # from vlm_filtered_boxes.json
+  # 是否同时写出旧版 bbox PKL（默认 false；仅兼容需求时开启）
+  write_bbox_pkls: false
 
 # API Configuration (shared, no model duplication here)
 api:

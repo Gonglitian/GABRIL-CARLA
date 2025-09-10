@@ -40,6 +40,7 @@ import logging
 import os
 import pickle
 import random
+import re
 from collections import defaultdict
 from datetime import datetime
 from functools import partial
@@ -124,12 +125,17 @@ def _process_images(traj_path: str) -> Tuple[Dict[str, List[np.ndarray]], Dict[s
     Identifies directories named like "images0", "images1", ... (excluding depth images)
     and constructs observations and next_observations as aligned lists.
     """
-    image_dir_names = sorted(
-        [x for x in os.listdir(traj_path) if ("images" in x and "depth" not in x)],
-        key=lambda x: int(x.split("images")[1]),
-    )
+    # 严格匹配形如 images<数字> 的目录，忽略文件和其他命名（如 images0_saliency.gif）
+    names: List[Tuple[int, str]] = []
+    for x in os.listdir(traj_path):
+        p = os.path.join(traj_path, x)
+        if not os.path.isdir(p):
+            continue
+        m = re.match(r"^images(\d+)$", x)
+        if m and ("depth" not in x):
+            names.append((int(m.group(1)), x))
+    image_dir_names = [name for _, name in sorted(names, key=lambda t: t[0])]
     image_paths = [os.path.join(traj_path, x) for x in image_dir_names]
-    image_paths = sorted(image_paths, key=lambda x: int(os.path.basename(x).split("images")[1]))
 
     images_out: Dict[str, List[np.ndarray]] = defaultdict(list)
 

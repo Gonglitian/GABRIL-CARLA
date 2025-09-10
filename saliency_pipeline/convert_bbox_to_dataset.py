@@ -18,14 +18,19 @@ import pickle
 import yaml
 import torch
 import numpy as np
+import cv2
+import imageio
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 import argparse
+import random
 
 # Reuse pipeline utilities for route/seed enumeration
 # Local module import (same dir)
 from pipeline_utils import get_routes_seeds, load_pipeline_config
 from config_manager import load_merged_config
+_GIF_ALLOWED: set[str] = set()
+_GIF_ROOT: Optional[Path] = None
 
 
 def load_config(config_path: Optional[Path] = None, domain: Optional[str] = None) -> Dict[str, Any]:
@@ -104,7 +109,7 @@ def enumerate_bdv2_targets(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         traj_dir = dataset_root / task / timestamp / "raw" / traj_group / traj_name
         route = f"bdv2/{task}/{timestamp}/{traj_group}/{traj_name}"
         seed = f"images{camera}"
-        out.append({"route": route, "seed": seed, "traj_dir": traj_dir})
+        out.append({"route": route, "seed": seed, "traj_dir": traj_dir, "task": task})
     elif mode == "bdv2_task":
         task = rm.get("bdv2_task", {}).get("task")
         camera = int(rm.get("bdv2_task", {}).get("camera", 0))
@@ -118,7 +123,7 @@ def enumerate_bdv2_targets(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                 for tr_dir in sorted(d for d in g_dir.iterdir() if d.is_dir() and d.name.startswith("traj")):
                     route = f"bdv2/{task}/{ts_dir.name}/{g_dir.name}/{tr_dir.name}"
                     seed = f"images{camera}"
-                    out.append({"route": route, "seed": seed, "traj_dir": tr_dir})
+                    out.append({"route": route, "seed": seed, "traj_dir": tr_dir, "task": task})
     elif mode == "bdv2_all":
         camera = int(rm.get("bdv2_all", {}).get("camera", 0))
         # Iterate all tasks under dataset_root
@@ -132,7 +137,8 @@ def enumerate_bdv2_targets(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                     for tr_dir in sorted(d for d in g_dir.iterdir() if d.is_dir() and d.name.startswith("traj")):
                         route = f"bdv2/{task}/{ts_dir.name}/{g_dir.name}/{tr_dir.name}"
                         seed = f"images{camera}"
-                        out.append({"route": route, "seed": seed, "traj_dir": tr_dir})
+                        # task from directory name
+                        out.append({"route": route, "seed": seed, "traj_dir": tr_dir, "task": task})
     else:
         raise ValueError(f"Invalid bdv2 run_mode: {mode}")
     return out
@@ -287,53 +293,56 @@ def process_one_bdv2(target: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, A
     vlm_filtered_json = saliency_dir / fn["vlm_filtered_boxes"]
     grounding_json = saliency_dir / fn["grounding_detections"]
     traj_dir: Path = Path(target["traj_dir"])  # contains obs_dict.pkl
-    # Configurable PKL output filenames
-    pkl_fn_cfg: Dict[str, str] = data_cfg.get("pkl_filenames", {})
-    no_filter_name = pkl_fn_cfg.get("no_filter", "no_filter.pkl")
-    filter_name = pkl_fn_cfg.get("filter", "filter.pkl")
+    # Control whether to write bbox PKLs (default False)
+    write_bbox_pkls: bool = bool(data_cfg.get("write_bbox_pkls", False))
+    # Configurable PKL output filenames (used only if write_bbox_pkls=True)
+    pkl_fn_cfg: Dict[str, str] = data_cfg.get("pkl_filenames", {}) if write_bbox_pkls else {}
+    no_filter_name = pkl_fn_cfg.get("no_filter", "no_filter.pkl") if write_bbox_pkls else None
+    filter_name = pkl_fn_cfg.get("filter", "filter.pkl") if write_bbox_pkls else None
 
-    out_no_filter_pkl = traj_dir / no_filter_name
-    out_filter_pkl = traj_dir / filter_name
+    out_no_filter_pkl = (traj_dir / no_filter_name) if no_filter_name else None
+    out_filter_pkl = (traj_dir / filter_name) if filter_name else None
 
     result = {"route": target["route"], "seed": target["seed"], "traj_dir": str(traj_dir), "success": True, "written": {}, "errors": []}
 
-    # 1) Write no_filter.pkl from grounding_detections.json
-    try:
-        if not grounding_json.exists():
-            raise FileNotFoundError(f"Missing {grounding_json}")
-        non_filter_seq, _ = load_grounding_boxes(grounding_json)
-        if out_no_filter_pkl.exists() and not overwrite:
-            print(f"  ⚠️  Exists, skip: {out_no_filter_pkl}")
-        else:
-            with open(out_no_filter_pkl, "wb") as f:
-                pickle.dump(non_filter_seq, f)
-            print(f"  💾 Saved (BDV2 no_filter): {out_no_filter_pkl}  (frames={len(non_filter_seq)})")
-        result["written"]["no_filter_pkl"] = str(out_no_filter_pkl)
-    except Exception as e:
-        msg = f"bdv2 no_filter write failed: {e}"
-        print(f"  ❌ {msg}")
-        result["success"] = False
-        result["errors"].append(msg)
-
-    # 2) Write filter.pkl from vlm_filtered_boxes.json (optional)
-    try:
-        if not vlm_filtered_json.exists():
-            # If there was no VLM filtering stage, silently skip filter.pkl
-            print(f"  ℹ️  No VLM-filtered JSON found, skipping filter.pkl ({vlm_filtered_json})")
-        else:
-            filt_seq, _ = load_filtered_boxes(vlm_filtered_json)
-            if out_filter_pkl.exists() and not overwrite:
-                print(f"  ⚠️  Exists, skip: {out_filter_pkl}")
+    # 1) Optionally write no_filter.pkl from grounding_detections.json
+    if write_bbox_pkls and out_no_filter_pkl is not None:
+        try:
+            if not grounding_json.exists():
+                raise FileNotFoundError(f"Missing {grounding_json}")
+            non_filter_seq, _ = load_grounding_boxes(grounding_json)
+            if out_no_filter_pkl.exists() and not overwrite:
+                print(f"  ⚠️  Exists, skip: {out_no_filter_pkl}")
             else:
-                with open(out_filter_pkl, "wb") as f:
-                    pickle.dump(filt_seq, f)
-                print(f"  💾 Saved (BDV2 filter): {out_filter_pkl}  (frames={len(filt_seq)})")
-            result["written"]["filter_pkl"] = str(out_filter_pkl)
-    except Exception as e:
-        msg = f"bdv2 filter write failed: {e}"
-        print(f"  ❌ {msg}")
-        result["success"] = False
-        result["errors"].append(msg)
+                with open(out_no_filter_pkl, "wb") as f:
+                    pickle.dump(non_filter_seq, f)
+                print(f"  💾 Saved (BDV2 no_filter): {out_no_filter_pkl}  (frames={len(non_filter_seq)})")
+            result["written"]["no_filter_pkl"] = str(out_no_filter_pkl)
+        except Exception as e:
+            msg = f"bdv2 no_filter write failed: {e}"
+            print(f"  ❌ {msg}")
+            result["success"] = False
+            result["errors"].append(msg)
+
+    # 2) Optionally write filter.pkl from vlm_filtered_boxes.json
+    if write_bbox_pkls and out_filter_pkl is not None:
+        try:
+            if not vlm_filtered_json.exists():
+                print(f"  ℹ️  No VLM-filtered JSON found, skipping filter.pkl ({vlm_filtered_json})")
+            else:
+                filt_seq, _ = load_filtered_boxes(vlm_filtered_json)
+                if out_filter_pkl.exists() and not overwrite:
+                    print(f"  ⚠️  Exists, skip: {out_filter_pkl}")
+                else:
+                    with open(out_filter_pkl, "wb") as f:
+                        pickle.dump(filt_seq, f)
+                    print(f"  💾 Saved (BDV2 filter): {out_filter_pkl}  (frames={len(filt_seq)})")
+                result["written"]["filter_pkl"] = str(out_filter_pkl)
+        except Exception as e:
+            msg = f"bdv2 filter write failed: {e}"
+            print(f"  ❌ {msg}")
+            result["success"] = False
+            result["errors"].append(msg)
 
     # 3) Generate saliency_map.pkl using multi-point Gaussian per-frame (H=480, W=640 by default)
     try:
@@ -345,11 +354,12 @@ def process_one_bdv2(target: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, A
         # Derive centers per frame
         center_seq = centers_from_boxes(box_seq)
 
-        # Resolve BDV2 image size and saliency params
-        bdv2_cfg: Dict[str, Any] = cfg.get("bdv2", {})
-        H = int(bdv2_cfg.get("image_height", 480))
-        W = int(bdv2_cfg.get("image_width", 640))
-        sal_cfg: Dict[str, Any] = bdv2_cfg.get("saliency", {})
+        # Resolve saliency params (prefer bbox_to_dataset.saliency, fallback to bdv2.saliency)
+        b2d_sal: Dict[str, Any] = cfg.get("bbox_to_dataset", {}).get("saliency", {}) or {}
+        legacy_sal: Dict[str, Any] = cfg.get("bdv2", {}).get("saliency", {}) or {}
+        sal_cfg: Dict[str, Any] = b2d_sal if b2d_sal else legacy_sal
+        H = int(sal_cfg.get("image_height", 480))
+        W = int(sal_cfg.get("image_width", 640))
         sigma = float(sal_cfg.get("sigma", 30.0))
         out_name = sal_cfg.get("output_name", "saliency_map.pkl")
 
@@ -403,6 +413,57 @@ def process_one_bdv2(target: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, A
                 pickle.dump(saliency_np, f)
             print(f"  💾 Saved (BDV2 saliency_map): {out_saliency_pkl}  (shape={saliency_np.shape}, dtype=float32)")
         result["written"]["saliency_map_pkl"] = str(out_saliency_pkl)
+
+        # Build 50% overlay GIF for visualization (one random traj per task, unified directory)
+        try:
+            route = str(target.get("route", ""))
+            if route in _GIF_ALLOWED and _GIF_ROOT is not None:
+                # Locate image directory (seed like images0)
+                img_dir = traj_dir / target["seed"]
+                if not img_dir.exists():
+                    # fallback: find first images* directory
+                    cands = sorted([d for d in traj_dir.iterdir() if d.is_dir() and d.name.startswith("images")])
+                    if cands:
+                        img_dir = cands[0]
+                img_paths = sorted(img_dir.glob("im_*.jpg"), key=lambda p: int(p.stem.split("_")[-1]))
+                if not img_paths:
+                    print(f"  ℹ️  No images found under {img_dir}, skip GIF overlay")
+                else:
+                    # Visualization config
+                    viz_cfg: Dict[str, Any] = cfg.get("bbox_to_dataset", {}).get("visualization", {}) or {}
+                    fps = int(viz_cfg.get("fps", 20))
+                    # Build unified gif filename from route components
+                    # route: bdv2/<task>/<timestamp>/<traj_group>/<traj_name>
+                    parts = route.split("/")
+                    task = parts[1] if len(parts) > 1 else "task"
+                    timestamp = parts[2] if len(parts) > 2 else "ts"
+                    traj_group = parts[3] if len(parts) > 3 else "g"
+                    traj_name = parts[4] if len(parts) > 4 else "traj"
+                    gif_name = f"{task}_{timestamp}_{traj_group}_{traj_name}_{target['seed']}.gif"
+                    out_gif = _GIF_ROOT / gif_name
+                    _GIF_ROOT.mkdir(parents=True, exist_ok=True)
+                    frames = []
+                    T_img = len(img_paths)
+                    T = min(T_img, saliency_np.shape[0])
+                    for t in range(T):
+                        img_bgr = cv2.imread(str(img_paths[t]))
+                        if img_bgr is None:
+                            continue
+                        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                        H_img, W_img = img_rgb.shape[:2]
+                        heat = saliency_np[t, 0]
+                        # resize saliency to image size
+                        heat_resized = cv2.resize((heat * 255.0).astype(np.uint8), (W_img, H_img), interpolation=cv2.INTER_LINEAR)
+                        heat_color = cv2.applyColorMap(heat_resized, cv2.COLORMAP_JET)
+                        heat_rgb = cv2.cvtColor(heat_color, cv2.COLOR_BGR2RGB)
+                        overlay = (0.5 * img_rgb + 0.5 * heat_rgb).clip(0, 255).astype(np.uint8)
+                        frames.append(overlay)
+                    if frames:
+                        imageio.mimsave(str(out_gif), frames, format="GIF", duration=max(1e-3, 1.0 / max(1, fps)))
+                        print(f"  🎞️  Saved overlay GIF: {out_gif}  (frames={len(frames)}, fps={fps})")
+                        result["written"]["saliency_gif"] = str(out_gif)
+        except Exception as e:
+            print(f"  ⚠️  Failed to write overlay GIF: {e}")
     except Exception as e:
         msg = f"bdv2 saliency_map write failed: {e}"
         print(f"  ❌ {msg}")
@@ -440,6 +501,24 @@ Examples:
 
     if cfg.get("dataset", {}).get("type", "bench2drive").lower() == "bdv2":
         targets = enumerate_bdv2_targets(cfg)
+        # Decide random gif per task
+        global _GIF_ALLOWED, _GIF_ROOT
+        _GIF_ALLOWED = set()
+        _GIF_ROOT = None
+        try:
+            viz_cfg = cfg.get("common", {}).get("data", {}).get("visualization", {}) or {}
+            root = viz_cfg.get("gif_root", "/data3/vla-reasoning/bdv2_saliency_filter_results/saliency_gifs")
+            _GIF_ROOT = Path(root)
+        except Exception:
+            _GIF_ROOT = Path("/data3/vla-reasoning/bdv2_saliency_filter_results/saliency_gifs")
+        # group by task
+        by_task: Dict[str, List[Dict[str, Any]]] = {}
+        for t in targets:
+            task = t.get("task") or (t.get("route", "").split("/")[1] if "/" in t.get("route", "") else "task")
+            by_task.setdefault(task, []).append(t)
+        for task, lst in by_task.items():
+            choice = random.choice(lst)
+            _GIF_ALLOWED.add(str(choice.get("route", "")))
         print(f"🔎 BDV2 targets: {len(targets)} trajs")
         ok = 0
         for t in targets:

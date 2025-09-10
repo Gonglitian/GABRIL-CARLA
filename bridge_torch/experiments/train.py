@@ -281,10 +281,13 @@ def main(_):
         mlp = MLP_BC(input_dim=enc_feat + prop_dim)
         policy = torch.nn.Sequential()  # placeholder not used directly
         model = None  # set below via BCAgent
+        # Filter out saliency from policy kwargs (handled by agent config)
+        _policy_kwargs_bc = dict(cfg.agent_kwargs.get("policy_kwargs", {}))
+        _policy_kwargs_bc.pop("saliency", None)
         agent = BCAgent(
             model=
             __import__("bridge_torch.agents.bc", fromlist=["GaussianPolicy"])  # late import to reuse encoder
-            .GaussianPolicy(enc, mlp, action_dim=action_dim, use_proprio=cfg.agent_kwargs.get("use_proprio", False), **cfg.agent_kwargs["policy_kwargs"]),
+            .GaussianPolicy(enc, mlp, action_dim=action_dim, use_proprio=cfg.agent_kwargs.get("use_proprio", False), **_policy_kwargs_bc),
             cfg=BCAgentConfig(
                 network_kwargs=cfg.agent_kwargs.get("network_kwargs", {}),
                 policy_kwargs=cfg.agent_kwargs.get("policy_kwargs", {}),
@@ -314,6 +317,9 @@ def main(_):
             _ = (enc if enc_goal is None else enc_goal)(warmup_batch["goals"]["image"].to(device))
         inp_dim = getattr(enc, "_feat_dim") + (getattr(enc, "_feat_dim") if enc_goal is None else getattr(enc_goal, "_feat_dim")) + prop_dim
         mlp = MLP_GC(input_dim=inp_dim, **cfg.agent_kwargs.get("network_kwargs", {}))
+        # Filter out saliency from policy kwargs (handled by agent config)
+        _policy_kwargs_gc = dict(cfg.agent_kwargs.get("policy_kwargs", {}))
+        _policy_kwargs_gc.pop("saliency", None)
         model = __import__("bridge_torch.agents.gc_bc", fromlist=["GCBCPolicy"]).GCBCPolicy(
             obs_encoder=enc,
             goal_encoder=enc_goal,
@@ -321,7 +327,7 @@ def main(_):
             action_dim=action_dim,
             early_goal_concat=cfg.agent_kwargs.get("early_goal_concat", True),
             use_proprio=cfg.agent_kwargs.get("use_proprio", False),
-            **cfg.agent_kwargs.get("policy_kwargs", {}),
+            **_policy_kwargs_gc,
         )
         agent = GCBCAgent(
             model=model,

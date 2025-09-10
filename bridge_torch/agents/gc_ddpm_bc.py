@@ -8,10 +8,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-try:
-    from vlm_gaze.data_utils.gaze_utils import get_gaze_mask
-except Exception:
-    get_gaze_mask = None
+from bridge_torch.common.gaze import get_gaze_mask
+
 
 
 class MLP(nn.Module):
@@ -282,14 +280,17 @@ class GCDDPMBCAgent:
             alpha_hats.append(prod)
         self.alpha_hats = torch.tensor(alpha_hats, device=self.device, dtype=self.betas.dtype)
 
-        # saliency variant
+        # saliency variant — tolerate ConfigDict/str-bool
         sal_cfg = {}
         try:
-            # ddpm config puts actor-related kwargs in agent config; allow nested dict too
-            sal_cfg = dict(getattr(cfg, "saliency", {}) or {})
+            direct = getattr(self.cfg, "saliency", {}) or {}
+            if hasattr(direct, "to_dict"):
+                sal_cfg = direct.to_dict()
+            elif isinstance(direct, dict):
+                sal_cfg = dict(direct)
         except Exception:
-            sal_cfg = getattr(cfg, "saliency", {}) or {}
-        self._saliency_enabled = bool(sal_cfg.get("enabled", False))
+            sal_cfg = {}
+        self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
         self._saliency_weight = float(sal_cfg.get("weight", 1.0))
         self._saliency_beta = float(sal_cfg.get("beta", 1.0))
         self._last_spatial = None

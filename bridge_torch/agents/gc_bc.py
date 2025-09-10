@@ -6,11 +6,7 @@ from typing import Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-try:
-    from vlm_gaze.data_utils.gaze_utils import get_gaze_mask
-except Exception:
-    get_gaze_mask = None
-
+from bridge_torch.common.gaze import get_gaze_mask
 
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dims=(256, 256, 256), dropout_rate=0.0, activate_final=True):
@@ -127,16 +123,27 @@ class GCBCAgent:
                     self.scheduler = torch.optim.lr_scheduler.SequentialLR(self.optimizer, scheds, milestones=[cfg.warmup_steps])
         self.step = 0
 
-        # saliency variant
+        # saliency variant — tolerate ConfigDict/str-bool
         sal_cfg = {}
         try:
-            if hasattr(cfg, "policy_kwargs") and isinstance(cfg.policy_kwargs, dict):
-                sal_cfg = dict(cfg.policy_kwargs.get("saliency", {}) or {})
+            pk = getattr(cfg, "policy_kwargs", {}) or {}
+            if hasattr(pk, "to_dict"):
+                pk = pk.to_dict()
+            elif not isinstance(pk, dict):
+                try:
+                    pk = dict(pk)
+                except Exception:
+                    pk = {}
+            sal_cfg = dict(pk.get("saliency", {}) or {})
             if not sal_cfg:
-                sal_cfg = getattr(cfg, "saliency", {}) or {}
+                direct = getattr(cfg, "saliency", {}) or {}
+                if hasattr(direct, "to_dict"):
+                    sal_cfg = direct.to_dict()
+                elif isinstance(direct, dict):
+                    sal_cfg = dict(direct)
         except Exception:
-            sal_cfg = getattr(cfg, "saliency", {}) or {}
-        self._saliency_enabled = bool(sal_cfg.get("enabled", False))
+            sal_cfg = {}
+        self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
         self._saliency_weight = float(sal_cfg.get("weight", 1.0))
         self._saliency_beta = float(sal_cfg.get("beta", 1.0))
         self._last_spatial = None
@@ -167,6 +174,7 @@ class GCBCAgent:
         if self._saliency_enabled and (get_gaze_mask is not None) and ("saliency" in obs):
             try:
                 z_map = self._last_spatial
+                print("zmap", self._last_spatial)
                 self._last_spatial = None
                 if z_map is not None and z_map.dim() == 4:
                     target = obs["saliency"]

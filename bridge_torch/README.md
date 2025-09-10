@@ -67,10 +67,11 @@ bridgedata_raw/
 python bridge_data_v2/data_processing/bridgedata_raw_to_numpy.py \
   --input_path /path/to/bridgedata_raw \
   --output_path /path/to/bdv2_numpy \
-  --depth 5 \
-  --train_proportion 0.9 \
+  --depth 2 \
+  --train_proportion 0.99 \
   --num_workers 8 \
-  --im_size 256
+  --im_size 256 \
+  --saliency
 
 # 转换完成后：
 # /path/to/bdv2_numpy/<task>/train/out.npy

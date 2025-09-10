@@ -7,6 +7,12 @@ python -m bridge_torch.experiments.eval \
   --ip localhost --port 5556 \
   --num_timesteps 120 --act_exec_horizon 1 --deterministic --show_image
 
+# run numpy data convert 
+python bridge_torch/data/bdv2_to_numpy.py \
+  --input_path /data3/vla-reasoning/dataset/bdv2 \
+  --output_path /data3/vla-reasoning/dataset/bdv2_numpy \
+  --depth 2 --num_workers 8 --train_proportion 0.99 --im_size 256 --saliency
+
 # run training with nohup
 nohup python bridge_torch/experiments/multi_train.py\
   --config bridge_torch/experiments/configs/multi_train.yaml > log.txt 2>&1 &

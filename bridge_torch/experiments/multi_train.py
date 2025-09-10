@@ -30,9 +30,14 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
     algo = run["algo"]
     task = run["task"]
 
-    name = run.get("name") or g.get("name_format", "{algo}_{task}").format(
-        algo=algo, task=task
-    )
+    # Determine run name; if global.saliency.enabled is true, append suffix
+    sal = g.get("saliency", {}) or {}
+    if bool(sal.get("enabled", False)):
+        name = f"{algo}_{task}_saliency"
+    else:
+        name = run.get("name") or g.get("name_format", "{algo}_{task}").format(
+            algo=algo, task=task
+        )
 
     base_args = [
         "--name",

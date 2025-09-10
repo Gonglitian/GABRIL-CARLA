@@ -347,9 +347,9 @@ def build_bbox_to_dataset_config(unified: Dict[str, Any]) -> Dict[str, Any]:
                 "filenames": {
                     "grounding_detections": filenames.get("grounding_detections", "grounding_detections.json"),
                     "vlm_filtered_boxes": filenames.get("vlm_filtered_boxes", "vlm_filtered_boxes.json"),
-                    "non_filter_pt": filenames.get("non_filter_pt", "non_filter.pt"),
-                    "filter_dynamic_pt": filenames.get("filter_dynamic_pt", "filter_dynamic.pt"),
                 },
+                # unified visualization/gif root (optional)
+                "visualization": unified.get("bbox_to_dataset", {}).get("visualization", {}),
             },
             "processing": {"overwrite": overwrite},
         },
@@ -377,10 +377,9 @@ def build_bbox_to_dataset_config(unified: Dict[str, Any]) -> Dict[str, Any]:
         else:
             cfg["bdv2"]["run_mode"]["bdv2_task"] = dict(run_cfg.get("bdv2_task", {}))
         pkl_names = unified.get("bbox_to_dataset", {}).get("pkl_filenames", {})
-        cfg["common"]["data"]["pkl_filenames"] = {
-            "no_filter": pkl_names.get("no_filter", "no_filter.pkl"),
-            "filter": pkl_names.get("filter", "filter.pkl"),
-        }
+        # optional legacy pkls not required anymore
+        if pkl_names:
+            cfg["common"]["data"]["pkl_filenames"] = pkl_names
     return cfg
 
 
@@ -400,6 +399,14 @@ def orchestrate(unified_cfg_path: Path, dry_run: bool = False) -> None:
     gd_cfg = build_global_desc_config(unified)
     vf_cfg = build_vlm_filter_config(unified)
     bx_cfg = build_bbox_to_dataset_config(unified)
+
+    # Pass unified gif root to converter via common.data.visualization
+    try:
+        gif_root = unified.get("bbox_to_dataset", {}).get("visualization", {}).get("gif_root", None)
+        if gif_root:
+            bx_cfg.setdefault("common", {}).setdefault("data", {}).setdefault("visualization", {})["gif_root"] = ensure_abs(gif_root)
+    except Exception:
+        pass
 
     # Persist configs (only those needed by enabled stages)
     gd_file = gen_root / f"global_desc__{dataset_type}.yaml"

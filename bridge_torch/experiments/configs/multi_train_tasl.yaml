@@ -1,7 +1,7 @@
 # Torch multi-run example
 matrix:
   algos: ["bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
-  tasks: ["lift_carrot_100"]  # 可改为以下任一 data_config 任务：
+  tasks: ["lift_carrot_100", "lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100", "put_in_pot_lid_100"]  # 可改为以下任一 data_config 任务：
   #   - "lift_carrot_100"
   #   - "lift_carrot_100_confounded"
   #   - "pull_pot_100"
@@ -13,8 +13,8 @@ global:
   # Paths
   # data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
   # save_dir: /data3/vla-reasoning/exp/bdv2_runs_0908
-  data_root: /scr/litian/dataset/bdv2_numpy
-  save_dir: /scr/litian/torch_runs
+  data_root: /data3/vla-reasoning/dataset/bdv2_numpy
+  save_dir: /data3/vla-reasoning/torch_runs
   # Training schedule
   train_batch_size: 2000
   num_steps: 30000
@@ -34,13 +34,13 @@ global:
   warmup_steps: 3000
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "3,5,6,7"
+  cuda_visible_devices: "1,2,4,5"
 
   name_format: "{algo}_{task}"
   # 统一的 saliency 配置（global 生效）
   saliency:
     enabled: true
-    alpha: 0.7
+    alpha: 1.0
     beta: 1.0
     weight: 0.2
 
@@ -96,16 +96,6 @@ global:
     prefetch_factor: 4
     persistent_workers: true
     pin_memory: true
-
-  # 性能剖析（仅主进程生效），输出到 save_dir/bridgedata_torch/<run>/profiler
-  profiler:
-    enabled: false
-    wait: 1      # 等待步数（不记录）
-    warmup: 1    # 预热步数（记录但不导出）
-    active: 5    # 采集步数
-    repeat: 1
-    record_shapes: true
-    with_stack: false
 
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:

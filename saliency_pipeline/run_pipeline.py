@@ -4,7 +4,7 @@ Unified pipeline launcher for Bench2Drive and BDV2.
 
 Reads a single YAML config and orchestrates three stages sequentially:
 1) get_global_desc.py
-2) vlm_filter_refactored.py
+2) vlm_filter.py
 3) convert_bbox_to_dataset.py
 
 The script generates per-stage temporary YAML configs from the unified config
@@ -144,7 +144,7 @@ def build_global_desc_config(unified: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_vlm_filter_config(unified: Dict[str, Any]) -> Dict[str, Any]:
     dataset_type = unified.get("dataset", {}).get("type", "bench2drive").lower()
-    model_id = unified.get("vlm_filter", {}).get("model_id", "IDEA-Research/grounding-dino-base")
+    model_id = unified.get("vlm_filter", {}).get("grounding_model_id", "IDEA-Research/grounding-dino-base")
     device = unified.get("vlm_filter", {}).get("device", "cpu")
     det = unified.get("vlm_filter", {}).get("detection", {})
     out = unified.get("vlm_filter", {}).get("output", {})
@@ -184,6 +184,13 @@ def build_vlm_filter_config(unified: Dict[str, Any]) -> Dict[str, Any]:
     prompt_cfg = unified.get("vlm_filter", {}).get("prompt", {}) or {}
     templates_cfg = prompt_cfg.get("templates") if isinstance(prompt_cfg, dict) else None
 
+    # YOLO (optional) for gripper detection
+    yolo_cfg = (
+        unified.get("vlm_filter", {}).get("yolo", {})
+        or unified.get("yolo", {})
+        or {}
+    )
+
     cfg: Dict[str, Any] = {
         "dataset": {"type": dataset_type},
         "model": {"model_id": model_id, "device": device},
@@ -199,7 +206,7 @@ def build_vlm_filter_config(unified: Dict[str, Any]) -> Dict[str, Any]:
         "detection": {
             "text_prompt": det.get("text_prompt", "car. person. traffic light. traffic sign. bicycle. motorcycle."),
             "backend": det.get("backend", "local"),
-            "use_existing_json": bool(det.get("use_existing_json", False)),
+            "use_existing_json": bool(det.get("use_existing_bbox_json", False)),
             "existing_json": {
                 "base_dir": ensure_abs(det.get("existing_base_dir", "")),
                 "filename": det.get("existing_filename", "grounding_detections.json"),
@@ -208,8 +215,16 @@ def build_vlm_filter_config(unified: Dict[str, Any]) -> Dict[str, Any]:
             "text_threshold": float(det.get("text_threshold", 0.3)),
             "tracking": {"iou_threshold": float(det.get("iou_threshold", 0.2))},
         },
+        # Optional YOLO stage for gripper detection
+        "yolo": {
+            "enabled": bool(yolo_cfg.get("enabled", False)),
+            "model_path": ensure_abs(yolo_cfg.get("model_path", str((Path(__file__).parent / "models" / "yolo_widowx_gripper.pt").resolve()))),
+            "conf_threshold": float(yolo_cfg.get("conf_threshold", 0.85)),
+            # index->class name mapping (default single-class gripper)
+            "class_map": yolo_cfg.get("class_map", {0: "gripper"}),
+        },
         "vlm_filtering": {
-            "enabled": bool(unified.get("vlm_filter", {}).get("enabled", False)),
+            "enabled": bool(unified.get("vlm_filter", {}).get("vlm_enabled", False)),
             "detail_level": unified.get("vlm_filter", {}).get("detail_level", "low"),
             "max_redetect_iterations": int(unified.get("vlm_filter", {}).get("max_redetect_iterations", 2)),
         },
@@ -372,6 +387,11 @@ def build_bbox_to_dataset_config(unified: Dict[str, Any]) -> Dict[str, Any]:
 def orchestrate(unified_cfg_path: Path, dry_run: bool = False) -> None:
     unified = read_yaml(unified_cfg_path)
     dataset_type = unified.get("dataset", {}).get("type", "bench2drive").lower()
+    stages = unified.get("stages", {
+        "global_desc": True,
+        "vlm_filter": True,
+        "bbox_to_dataset": True,
+    })
 
     gen_root = Path(__file__).parent / "configs" / "_generated"
     gen_root.mkdir(parents=True, exist_ok=True)
@@ -381,47 +401,56 @@ def orchestrate(unified_cfg_path: Path, dry_run: bool = False) -> None:
     vf_cfg = build_vlm_filter_config(unified)
     bx_cfg = build_bbox_to_dataset_config(unified)
 
-    # Persist configs
+    # Persist configs (only those needed by enabled stages)
     gd_file = gen_root / f"global_desc__{dataset_type}.yaml"
     vf_file = gen_root / f"vlm_filter__{dataset_type}.yaml"
     bx_file = gen_root / f"bbox_to_dataset__{dataset_type}.yaml"
-    write_yaml(gd_cfg, gd_file)
-    write_yaml(vf_cfg, vf_file)
-    write_yaml(bx_cfg, bx_file)
 
     print("Generated stage configs:")
-    print(f"  - {gd_file}")
-    print(f"  - {vf_file}")
-    print(f"  - {bx_file}")
+    if stages.get("global_desc", True):
+        write_yaml(gd_cfg, gd_file)
+        print(f"  - {gd_file}")
+    if stages.get("vlm_filter", True):
+        write_yaml(vf_cfg, vf_file)
+        print(f"  - {vf_file}")
+    if stages.get("bbox_to_dataset", True):
+        write_yaml(bx_cfg, bx_file)
+        print(f"  - {bx_file}")
 
     if dry_run:
         print("Dry-run enabled. Skipping execution.")
         return
 
-    # 1) Global description
+    # 1) Global description (optional)
     code_root = Path(__file__).parent
-    gd_script = code_root / "get_global_desc.py"
-    gd_cmd = [sys.executable, str(gd_script), "--config", str(gd_file), "--domain", dataset_type]
-    print("\n[1/3] Running global description...")
-    rc = run_cmd(gd_cmd)
-    if rc != 0:
-        raise SystemExit(f"Global description failed with code {rc}")
+    stage_idx = 1
+    if stages.get("global_desc", True):
+        gd_script = code_root / "get_global_desc.py"
+        gd_cmd = [sys.executable, str(gd_script), "--config", str(gd_file), "--domain", dataset_type]
+        print(f"\n[{stage_idx}/3] Running global description...")
+        rc = run_cmd(gd_cmd)
+        if rc != 0:
+            raise SystemExit(f"Global description failed with code {rc}")
+        stage_idx += 1
 
-    # 2) VLM filter + tracking
-    vf_script = code_root / "vlm_filter_refactored.py"
-    vf_cmd = [sys.executable, str(vf_script), "--config", str(vf_file), "--domain", dataset_type]
-    print("\n[2/3] Running VLM filter pipeline...")
-    rc = run_cmd(vf_cmd)
-    if rc != 0:
-        raise SystemExit(f"VLM filter failed with code {rc}")
+    # 2) VLM filter + tracking (optional)
+    if stages.get("vlm_filter", True):
+        vf_script = code_root / "vlm_filter.py"
+        vf_cmd = [sys.executable, str(vf_script), "--config", str(vf_file), "--domain", dataset_type]
+        print(f"\n[{stage_idx}/3] Running VLM filter pipeline...")
+        rc = run_cmd(vf_cmd)
+        if rc != 0:
+            raise SystemExit(f"VLM filter failed with code {rc}")
+        stage_idx += 1
 
-    # 3) Convert bboxes to dataset artifacts
-    bx_script = code_root / "convert_bbox_to_dataset.py"
-    bx_cmd = [sys.executable, str(bx_script), "--config", str(bx_file), "--domain", dataset_type]
-    print("\n[3/3] Converting bboxes to dataset...")
-    rc = run_cmd(bx_cmd)
-    if rc != 0:
-        raise SystemExit(f"BBox conversion failed with code {rc}")
+    # 3) Convert bboxes to dataset artifacts (optional)
+    if stages.get("bbox_to_dataset", True):
+        bx_script = code_root / "convert_bbox_to_dataset.py"
+        bx_cmd = [sys.executable, str(bx_script), "--config", str(bx_file), "--domain", dataset_type]
+        print(f"\n[{stage_idx}/3] Converting bboxes to dataset...")
+        rc = run_cmd(bx_cmd)
+        if rc != 0:
+            raise SystemExit(f"BBox conversion failed with code {rc}")
 
     print("\nPipeline completed successfully.")
 

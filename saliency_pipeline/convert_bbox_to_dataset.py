@@ -17,6 +17,7 @@ import json
 import pickle
 import yaml
 import torch
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 import argparse
@@ -85,10 +86,13 @@ def enumerate_bdv2_targets(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     - seed: seed label (images{camera})
     - traj_dir: path to BDV2 trajectory directory containing obs_dict.pkl
     """
-    rm = cfg.get("run_mode", {})
+    rm = cfg.get("run_mode", {}) or cfg.get("run", {})
     mode = rm.get("mode", "bdv2_single")
-    bd = cfg.get("bdv2", {})
-    dataset_root = Path(bd.get("dataset_root", "/data3/vla-reasoning/dataset/bdv2"))
+    # dataset_root may live under cfg['bdv2'] or cfg['dataset']['bdv2']
+    bd_root_cfg = cfg.get("bdv2", {})
+    if not bd_root_cfg:
+        bd_root_cfg = cfg.get("dataset", {}).get("bdv2", {})
+    dataset_root = Path(bd_root_cfg.get("dataset_root", "/data3/vla-reasoning/dataset/bdv2"))
     out: List[Dict[str, Any]] = []
     if mode == "bdv2_single":
         single = rm.get("bdv2_single", {})
@@ -327,6 +331,80 @@ def process_one_bdv2(target: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, A
             result["written"]["filter_pkl"] = str(out_filter_pkl)
     except Exception as e:
         msg = f"bdv2 filter write failed: {e}"
+        print(f"  ❌ {msg}")
+        result["success"] = False
+        result["errors"].append(msg)
+
+    # 3) Generate saliency_map.pkl using multi-point Gaussian per-frame (H=480, W=640 by default)
+    try:
+        # Re-load grounding boxes if not already available
+        if not grounding_json.exists():
+            raise FileNotFoundError(f"Missing {grounding_json}")
+        box_seq, total_frames = load_grounding_boxes(grounding_json)
+
+        # Derive centers per frame
+        center_seq = centers_from_boxes(box_seq)
+
+        # Resolve BDV2 image size and saliency params
+        bdv2_cfg: Dict[str, Any] = cfg.get("bdv2", {})
+        H = int(bdv2_cfg.get("image_height", 480))
+        W = int(bdv2_cfg.get("image_width", 640))
+        sal_cfg: Dict[str, Any] = bdv2_cfg.get("saliency", {})
+        sigma = float(sal_cfg.get("sigma", 30.0))
+        out_name = sal_cfg.get("output_name", "saliency_map.pkl")
+
+        # Build 1D Gaussian kernel
+        ksize = int(4 * sigma + 1)
+        if ksize % 2 == 0:
+            ksize += 1
+        x = torch.arange(ksize, dtype=torch.float32) - ksize // 2
+        kernel_1d = torch.exp(-(x ** 2) / (2 * (sigma ** 2)))
+        kernel_1d = kernel_1d / (kernel_1d.sum() + 1e-8)
+        padding = ksize // 2
+        k_row = kernel_1d.view(1, 1, -1, 1)
+        k_col = k_row.permute(0, 1, 3, 2)
+
+        # Allocate output (T,1,H,W)
+        T = len(center_seq)
+        saliency_np = np.zeros((T, 1, H, W), dtype=np.float32)
+
+        # Generate per-frame saliency
+        for t, pts in enumerate(center_seq):
+            if not pts:
+                continue
+            delta = torch.zeros(1, 1, H, W, dtype=torch.float32)
+            # Heuristic: detect normalized vs pixel coords
+            is_normalized = True
+            for cx, cy in pts:
+                if cx > 2.0 or cy > 2.0:
+                    is_normalized = False
+                    break
+            for cx, cy in pts:
+                if is_normalized:
+                    xi = int(min(max(round(cx * (W - 1)), 0), W - 1))
+                    yi = int(min(max(round(cy * (H - 1)), 0), H - 1))
+                else:
+                    xi = int(min(max(round(cx), 0), W - 1))
+                    yi = int(min(max(round(cy), 0), H - 1))
+                delta[0, 0, yi, xi] += 1.0
+
+            blurred = torch.nn.functional.conv2d(delta, k_row, padding=(0, padding))
+            blurred = torch.nn.functional.conv2d(blurred, k_col, padding=(padding, 0))
+            min_v = blurred.amin(dim=(2, 3), keepdim=True)
+            max_v = blurred.amax(dim=(2, 3), keepdim=True)
+            norm = (blurred - min_v) / (max_v - min_v + 1e-8)
+            saliency_np[t, 0] = norm[0, 0].numpy()
+
+        out_saliency_pkl = traj_dir / out_name
+        if out_saliency_pkl.exists() and not overwrite:
+            print(f"  ⚠️  Exists, skip: {out_saliency_pkl}")
+        else:
+            with open(out_saliency_pkl, "wb") as f:
+                pickle.dump(saliency_np, f)
+            print(f"  💾 Saved (BDV2 saliency_map): {out_saliency_pkl}  (shape={saliency_np.shape}, dtype=float32)")
+        result["written"]["saliency_map_pkl"] = str(out_saliency_pkl)
+    except Exception as e:
+        msg = f"bdv2 saliency_map write failed: {e}"
         print(f"  ❌ {msg}")
         result["success"] = False
         result["errors"].append(msg)

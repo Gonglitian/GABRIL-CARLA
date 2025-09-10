@@ -14,6 +14,11 @@ run:
   single_route:
     route_id: 2416
 
+stages:
+  global_desc: true
+  vlm_filter: true
+  bbox_to_dataset: true
+
 processing:
   seed: 42
   max_frames: 999
@@ -38,7 +43,8 @@ global_desc:
     max_retries: 3
 
 vlm_filter:
-  model_id: "IDEA-Research/grounding-dino-base"
+  vlm_enabled: true
+  grounding_model_id: "IDEA-Research/grounding-dino-base"
   device: "cuda:0"
   # Prompt 定制：可填写字符串或按域映射（如 {bdv2: "household manipulation", bench2drive: "autonomous driving"}）
   prompt:
@@ -101,13 +107,12 @@ vlm_filter:
   detection:
     text_prompt: "car. person. traffic light. traffic sign. bicycle. motorcycle."
     backend: "local"
-    use_existing_json: false
+    use_existing_bbox_json: false
     existing_base_dir: ""
     existing_filename: "grounding_detections.json"
     box_threshold: 0.4
     text_threshold: 0.3
     iou_threshold: 0.2
-  enabled: true
   detail_level: "low"
   max_redetect_iterations: 2
   output:

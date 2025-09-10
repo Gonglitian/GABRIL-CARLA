@@ -37,9 +37,12 @@ global:
   cuda_visible_devices: "3,5,6,7"
 
   name_format: "{algo}_{task}"
-  extra_args:
-    # 通过 YAML 打开本体/目标编码器拼接的 proprio 输入
-    - "--config.agent_kwargs.use_proprio True"
+  # 统一的 saliency 配置（global 生效）
+  saliency:
+    enabled: true
+    alpha: 1.0
+    beta: 1.0
+    weight: 0.2
 
   # 数据集相关可选配置（将映射到 config.dataset_kwargs.*）
   dataset:

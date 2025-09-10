@@ -328,3 +328,48 @@ python -m bridge_torch.experiments.train \
 - **全局随机种子**：设置 `numpy/torch/cuda` 种子与 `cudnn` 相关标志，提升复现性。
 - **性能优化（可选）**：AMP 混合精度；引入 DataLoader/多进程预处理或并行预取；调整日志/评估频率与 I/O 的权衡。
 - **文档/配置提示**：在 README/YAML 明示上述开关的默认行为与建议配置，降低踩坑概率。
+
+---
+
+## 9. Saliency 训练变体（Reg，仅当提供 saliency_map 时可用）
+
+本分支支持“Saliency 辅助正则（Reg）”训练：从编码器最后一层卷积特征图 `z_map (B,C,Hf,Wf)` 生成上采样的注意力掩码（`get_gaze_mask(z_map, beta, (H,W)) → (B,1,H,W)`），与数据集中提供的单帧 `saliency`（同维度 `(B,1,H,W)`）做 MSE 作为 `reg_loss`，并以 `total = base_loss + weight * reg_loss` 优化。
+
+启用步骤概览：
+- 数据准备：
+  - 运行 saliency pipeline 生成每条轨迹的 `saliency_map.pkl`（形状 `(T,1,480,640)`）。
+  - 运行 numpy 转换时带上 `--saliency`，将单帧 saliency（时间步 t）并入样本：
+    ```bash
+    python bridge_torch/data/bdv2_to_numpy.py \
+      --input_path <bdv2_raw_root> \
+      --output_path <bdv2_numpy_root> \
+      --depth 4 --im_size 128 --saliency | cat
+    ```
+  - 注意：即使 `obs_horizon>1`，saliency 也不做时间堆叠，仅使用采样时间步 t 的单帧；saliency 不做任何图像增强或几何变换。
+
+- 训练端开关（按算法）：
+  - BC / GC-BC：在 `agent_kwargs.policy_kwargs.saliency` 下配置：
+    ```yaml
+    agent_kwargs:
+      policy_kwargs:
+        saliency:
+          enabled: true   # 开启 Reg 分支
+          weight: 0.2     # reg_loss 权重
+          beta: 1.0       # get_gaze_mask 的温度参数
+    ```
+  - GC-DDPM-BC：在 `agent_kwargs.saliency` 下配置：
+    ```yaml
+    agent_kwargs:
+      saliency:
+        enabled: true
+        weight: 0.2
+        beta: 1.0
+    ```
+
+- 日志指标：
+  - `saliency_reg`: MSE 正则项
+  - `total_loss`: 含权重后的总损失
+
+实现要点（已内置，无需改源码）：
+- 数据侧：`bdv2_to_numpy.py` 读取 `saliency_map.pkl`，写入样本的 `observations.saliency`（HWC float32，C=1）；`bridge_numpy.py` 将其转换为张量 `(B,1,H,W)`，不做增强、不做时间堆叠。
+- 模型侧：`agents/{bc,gc_bc,gc_ddpm_bc}.py` 注册 forward hook 捕获编码器最后的 4D 卷积特征图，调用 `get_gaze_mask` 上采样并与 batch 中的 `observations.saliency` 做 MSE，加权至总损失。

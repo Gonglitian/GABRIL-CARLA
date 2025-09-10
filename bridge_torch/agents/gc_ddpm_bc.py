@@ -8,6 +8,10 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+try:
+    from vlm_gaze.data_utils.gaze_utils import get_gaze_mask
+except Exception:
+    get_gaze_mask = None
 
 
 class MLP(nn.Module):
@@ -278,6 +282,31 @@ class GCDDPMBCAgent:
             alpha_hats.append(prod)
         self.alpha_hats = torch.tensor(alpha_hats, device=self.device, dtype=self.betas.dtype)
 
+        # saliency variant
+        sal_cfg = {}
+        try:
+            # ddpm config puts actor-related kwargs in agent config; allow nested dict too
+            sal_cfg = dict(getattr(cfg, "saliency", {}) or {})
+        except Exception:
+            sal_cfg = getattr(cfg, "saliency", {}) or {}
+        self._saliency_enabled = bool(sal_cfg.get("enabled", False))
+        self._saliency_weight = float(sal_cfg.get("weight", 1.0))
+        self._saliency_beta = float(sal_cfg.get("beta", 1.0))
+        self._last_spatial = None
+        if self._saliency_enabled:
+            self._register_spatial_hook()
+
+    def _register_spatial_hook(self) -> None:
+        def _hook(_m, _i, out):
+            try:
+                if isinstance(out, torch.Tensor) and out.dim() == 4:
+                    self._last_spatial = out
+            except Exception:
+                pass
+            return None
+        for m in self.model.obs_encoder.modules():
+            m.register_forward_hook(_hook)
+
     def _polyak_update(self, tau: float):
         with torch.no_grad():
             for p, tp in zip(self.model.parameters(), self.target_model.parameters()):
@@ -304,7 +333,20 @@ class GCDDPMBCAgent:
         # time as float column
         t_float = t.float().view(B, 1)
         eps_pred = self.model(obs, goal, noisy_actions, t_float)
-        loss = F.mse_loss(eps_pred, noise, reduction="mean")
+        ddpm_loss = F.mse_loss(eps_pred, noise, reduction="mean")
+        reg_loss = torch.tensor(0.0, device=self.device)
+        if self._saliency_enabled and (get_gaze_mask is not None) and ("saliency" in obs):
+            try:
+                z_map = self._last_spatial
+                self._last_spatial = None
+                if z_map is not None and z_map.dim() == 4:
+                    target = obs["saliency"]
+                    H, W = int(target.shape[-2]), int(target.shape[-1])
+                    pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))
+                    reg_loss = F.mse_loss(pred, target)
+            except Exception:
+                pass
+        loss = ddpm_loss + self._saliency_weight * reg_loss
 
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -317,8 +359,9 @@ class GCDDPMBCAgent:
         self.step += 1
 
         info = {
-            "ddpm_loss": loss.item(),
-            "ddpm_loss_mean": loss.item(),
+            "ddpm_loss": float(ddpm_loss.item()),
+            "saliency_reg": float(reg_loss.item()) if reg_loss is not None else 0.0,
+            "total_loss": float(loss.item()),
             "actor_lr": self.optimizer.param_groups[0]["lr"],
         }
         return info

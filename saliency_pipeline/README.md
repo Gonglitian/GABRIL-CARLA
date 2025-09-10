@@ -13,7 +13,7 @@ refactor/
 ├── get_global_desc.py               # Refactored global description generator
 ├── pipeline_utils.py                # Refactored utility functions with config support
 ├── vlm_fliter.py                    # Original VLM filter (partially refactored)
-├── vlm_filter_refactored.py         # Fully refactored VLM filter
+├── vlm_filter.py         # Fully refactored VLM filter
 ├── test_config.py                   # Configuration testing suite
 └── README.md                        # This file
 ```
@@ -73,7 +73,7 @@ vlm:
 
 ```bash
 # Use the fully refactored version
-python vlm_filter_refactored.py
+python vlm_filter.py
 
 # Or the partially refactored original
 python vlm_fliter.py

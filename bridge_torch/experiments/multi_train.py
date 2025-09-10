@@ -82,6 +82,13 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
     ds_run = run.get("dataset", {})
     ds_cfg: Dict[str, Any] = _merge(ds_global, ds_run)
 
+    # Inject global saliency knobs: dataset alpha and agent saliency switches
+    sal = g.get("saliency", {}) or {}
+    if sal:
+        # dataset-side alpha for causal aggregation of saliency
+        if "alpha" in sal and sal["alpha"] is not None:
+            ds_cfg["saliency_alpha"] = sal["alpha"]
+
     # Ensure horizons compatible across algorithms
     if algo in {"bc", "gc_bc"}:
         if "act_pred_horizon" in ds_cfg and int(ds_cfg.get("act_pred_horizon", 1)) != 1:
@@ -107,6 +114,23 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
         ds_overrides: Dict[str, Any] = {}
         _flatten("config.dataset_kwargs", ds_cfg, ds_overrides)
         cfg_overrides.update(ds_overrides)
+
+    # Agent-side saliency (enabled/weight/beta) – map to algo-specific paths
+    if sal:
+        if algo in {"bc", "gc_bc"}:
+            if "enabled" in sal:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.enabled"] = str(bool(sal["enabled"]))
+            if "weight" in sal and sal["weight"] is not None:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.weight"] = str(sal["weight"])
+            if "beta" in sal and sal["beta"] is not None:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.beta"] = str(sal["beta"])
+        elif algo == "gc_ddpm_bc":
+            if "enabled" in sal:
+                cfg_overrides["config.agent_kwargs.saliency.enabled"] = str(bool(sal["enabled"]))
+            if "weight" in sal and sal["weight"] is not None:
+                cfg_overrides["config.agent_kwargs.saliency.weight"] = str(sal["weight"])
+            if "beta" in sal and sal["beta"] is not None:
+                cfg_overrides["config.agent_kwargs.saliency.beta"] = str(sal["beta"])
 
     # Pass through global knobs: amp / compile / dataloader / profiler / scheduler / wandb
     for knob_key in ("amp", "compile", "dataloader", "profiler", "scheduler", "wandb"):

@@ -49,6 +49,15 @@ global:
   extra_args:
     # 通过 YAML 打开本体/目标编码器拼接的 proprio 输入
     - "--config.agent_kwargs.use_proprio True"
+    # 示例：开启 Saliency 正则（Reg）并设置权重
+    # 对于 bc / gc_bc：放在 policy_kwargs 下
+    # - "--config.agent_kwargs.policy_kwargs.saliency.enabled True"
+    # - "--config.agent_kwargs.policy_kwargs.saliency.weight 0.2"
+    # - "--config.agent_kwargs.policy_kwargs.saliency.beta 1.0"
+    # 对于 gc_ddpm_bc：放在 agent_kwargs 下
+    # - "--config.agent_kwargs.saliency.enabled True"
+    # - "--config.agent_kwargs.saliency.weight 0.2"
+    # - "--config.agent_kwargs.saliency.beta 1.0"
 
   # 数据集相关可选配置（将映射到 config.dataset_kwargs.*）
   dataset:

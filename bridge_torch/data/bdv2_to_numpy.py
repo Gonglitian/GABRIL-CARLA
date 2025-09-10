@@ -77,6 +77,47 @@ def _squash_image(path: str) -> np.ndarray:
     return out
 
 
+def _squash_saliency_map(arr: np.ndarray) -> np.ndarray:
+    """Resize a single-channel float32 saliency map (H,W) to (im_size, im_size).
+
+    Keeps dtype float32 and value range [0,1]. Returns HWC with channel=1.
+    """
+    assert arr.ndim == 2, f"Expected (H,W) float32, got {arr.shape}"
+    try:
+        resample = Image.Resampling.BILINEAR  # Pillow>=9
+    except AttributeError:
+        resample = Image.BILINEAR  # type: ignore[attr-defined]
+    im = Image.fromarray(arr, mode="F")
+    im = im.resize((ARGS.im_size, ARGS.im_size), resample)
+    out = np.asarray(im).astype(np.float32)
+    return out[..., None]  # (H,W,1)
+
+
+def _process_saliency(traj_path: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Read saliency_map.pkl at trajectory root and build obs/next lists.
+
+    - Expects shape (T, 1, H, W) float32 in [0,1]
+    - Returns obs = [0..T-2], next = [1..T-1], each element shaped (H',W',1)
+    """
+    fp = os.path.join(traj_path, "saliency_map.pkl")
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f"Missing saliency_map.pkl at {traj_path}")
+    with open(fp, "rb") as f:
+        sal = pickle.load(f)
+    if not isinstance(sal, np.ndarray) or sal.ndim != 4 or sal.shape[1] != 1:
+        raise ValueError(f"Unexpected saliency format at {fp}: shape={getattr(sal, 'shape', None)}")
+    T, _, H, W = sal.shape
+    obs_l: List[np.ndarray] = []
+    next_l: List[np.ndarray] = []
+    for t in range(T):
+        hw = sal[t, 0]  # (H,W)
+        obs_l.append(_squash_saliency_map(hw))
+    # align like images
+    obs_out = obs_l[:-1]
+    next_out = obs_l[1:]
+    return obs_out, next_out
+
+
 def _process_images(traj_path: str) -> Tuple[Dict[str, List[np.ndarray]], Dict[str, List[np.ndarray]]]:
     """Process images at a trajectory level.
 
@@ -180,6 +221,12 @@ def _process_data_collection(path: str, train_ratio: float = 0.9) -> Tuple[List[
             assert "policy_out.pkl" in listing, f"Missing policy_out.pkl in {traj_path}: {listing}"
 
             obs_images, next_obs_images = _process_images(traj_path)
+            if getattr(ARGS, "saliency", False):
+                try:
+                    sal_obs, sal_next = _process_saliency(traj_path)
+                except Exception as e:
+                    logging.error(f"Saliency load failed for {traj_path}: {e}")
+                    sal_obs, sal_next = None, None
             actions = _process_actions(traj_path)
             state, next_state = _process_state(traj_path)
             time_stamp, next_time_stamp = _process_time(traj_path)
@@ -197,6 +244,10 @@ def _process_data_collection(path: str, train_ratio: float = 0.9) -> Tuple[List[
             output["next_observations"] = next_obs_images
             output["next_observations"]["state"] = next_state
             output["next_observations"]["time_stamp"] = next_time_stamp
+            if getattr(ARGS, "saliency", False) and sal_obs is not None and sal_next is not None:
+                # store as HWC float32 with C=1 to be consistent with images HWC
+                output["observations"]["saliency"] = sal_obs
+                output["next_observations"]["saliency"] = sal_next
 
             # Convert dict-of-lists to list-of-dicts per timestep
             output["observations"] = [
@@ -315,6 +366,7 @@ def _main() -> None:
     )
     parser.add_argument("--num_workers", type=int, default=8, help="Number of worker processes")
     parser.add_argument("--im_size", type=int, default=128, help="Image size for squashing")
+    parser.add_argument("--saliency", action="store_true", help="Also load and export saliency maps if present")
 
     args = parser.parse_args()
 

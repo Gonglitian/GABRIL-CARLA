@@ -89,6 +89,12 @@ def get_config(config_string):
                         tanh_squash_distribution=False,
                         fixed_std=[1, 1, 1, 1, 1, 1, 1],
                         state_dependent_std=False,
+                        # Saliency regularization (Reg variant) config
+                        saliency=dict(
+                            enabled=False,
+                            weight=0.0,
+                            beta=1.0,
+                        ),
                     ),
                     use_proprio=False,
                     learning_rate=3e-4,
@@ -103,6 +109,7 @@ def get_config(config_string):
                     augment=True,
                     obs_horizon=1,
                     act_pred_horizon=1,
+                    saliency_alpha=1.0,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -121,6 +128,12 @@ def get_config(config_string):
                         tanh_squash_distribution=False,
                         fixed_std=[1, 1, 1, 1, 1, 1, 1],
                         state_dependent_std=False,
+                        # Saliency regularization (Reg variant) config
+                        saliency=dict(
+                            enabled=False,
+                            weight=0.0,
+                            beta=1.0,
+                        ),
                     ),
                     early_goal_concat=True,
                     shared_goal_encoder=True,
@@ -137,6 +150,7 @@ def get_config(config_string):
                     augment=True,
                     obs_horizon=1,
                     act_pred_horizon=1,
+                    saliency_alpha=1.0,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",
@@ -160,6 +174,12 @@ def get_config(config_string):
                     early_goal_concat=True,
                     shared_goal_encoder=True,
                     use_proprio=False,
+                    # Saliency regularization (Reg variant) config
+                    saliency=dict(
+                        enabled=False,
+                        weight=0.0,
+                        beta=1.0,
+                    ),
                     beta_schedule="cosine",
                     diffusion_steps=20,
                     action_samples=1,
@@ -176,6 +196,7 @@ def get_config(config_string):
                     obs_horizon=1,
                     act_pred_horizon=1,
                     augment=True,
+                    saliency_alpha=1.0,
                     **base_data_config,
                 ),
                 encoder="resnetv1-34-bridge",

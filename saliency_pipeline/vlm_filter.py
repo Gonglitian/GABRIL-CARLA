@@ -28,6 +28,10 @@ import torch
 import cv2
 import imageio.v2 as imageio
 from PIL import Image
+try:
+    from ultralytics import YOLO as UltralyticsYOLO
+except Exception:
+    UltralyticsYOLO = None
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 import supervision as sv
 from supervision.draw.color import ColorPalette
@@ -118,6 +122,16 @@ class VLMFilterPipeline:
                                              ]))
         self.model = shared_model
         self.processor = shared_processor
+        # YOLO (optional) for gripper detection
+        yolo_cfg = self.config.get("yolo", {})
+        self.yolo_enabled = bool(yolo_cfg.get("enabled", False))
+        self.yolo_model_path = yolo_cfg.get("model_path")
+        self.yolo_conf_threshold = float(yolo_cfg.get("conf_threshold", 0.85))
+        self.yolo_class_map = yolo_cfg.get("class_map", {0: "gripper"})
+        self._yolo_model = None
+        if self.yolo_enabled and UltralyticsYOLO is None:
+            print("[WARN] YOLO enabled but ultralytics not available. Disabling YOLO stage.")
+            self.yolo_enabled = False
         self.forward_lock = inference_lock
         # API endpoints (if using API backend)
         self.api_urls = self._load_api_urls()
@@ -309,15 +323,61 @@ class VLMFilterPipeline:
             results_processed = self.processor.post_process_grounded_object_detection(
                 outputs, input_ids=inputs["input_ids"], target_sizes=target_sizes
             )[0]
-            detections = []
+            # Grounding detections
+            detections_grounding = []
             if "scores" in results_processed and len(results_processed["scores"]) > 0:
                 boxes = results_processed["boxes"].cpu().numpy()
                 scores = results_processed["scores"].cpu().numpy()
                 labels = results_processed["labels"]
                 for box, score, label in zip(boxes, scores, labels):
                     norm_box = normalize_bbox(box.tolist(), frame.shape[:2])
-                    detections.append({"label": label, "bbox": norm_box, "score": float(score)})
-            detections = grounding_filter(detections, detection_config["box_threshold"])
+                    detections_grounding.append({"label": label, "bbox": norm_box, "score": float(score)})
+
+            # YOLO gripper detections (optional) -> normalize bbox and merge into detections
+            yolo_detections: List[Dict[str, Any]] = []
+            if self.yolo_enabled:
+                if self._yolo_model is None:
+                    try:
+                        if not self.yolo_model_path:
+                            raise RuntimeError("YOLO model_path is empty")
+                        self._yolo_model = UltralyticsYOLO(self.yolo_model_path)
+                        print(f"[YOLO] Loaded model from {self.yolo_model_path}")
+                    except Exception as e:
+                        print(f"[YOLO ERROR] Failed to load model: {e}")
+                        self.yolo_enabled = False
+                if self.yolo_enabled and self._yolo_model is not None:
+                    try:
+                        # Ultralytics accepts numpy arrays in RGB
+                        np_img = np.array(image)
+                        yolo_results = self._yolo_model.predict(source=np_img, verbose=False)
+                        if yolo_results:
+                            r0 = yolo_results[0]
+                            if r0.boxes is not None and len(r0.boxes) > 0:
+                                h, w = np_img.shape[:2]
+                                for i in range(len(r0.boxes)):
+                                    conf = float(r0.boxes.conf[i].item())
+                                    if conf < self.yolo_conf_threshold:
+                                        continue
+                                    xyxy = r0.boxes.xyxy[i].tolist()
+                                    cls_id = int(r0.boxes.cls[i].item()) if getattr(r0.boxes, 'cls', None) is not None else 0
+                                    x1, y1, x2, y2 = xyxy
+                                    cx = ((x1 + x2) / 2.0) / float(w)
+                                    cy = ((y1 + y2) / 2.0) / float(h)
+                                    # Also keep full bbox normalized
+                                    nx1, ny1, nx2, ny2 = x1/float(w), y1/float(h), x2/float(w), y2/float(h)
+                                    label_name = self.yolo_class_map.get(cls_id, "gripper")
+                                    yolo_detections.append({
+                                        "label": label_name,
+                                        "bbox": [float(nx1), float(ny1), float(nx2), float(ny2)],
+                                        "score": conf,
+                                    })
+                    except Exception as e:
+                        print(f"[YOLO ERROR] Inference failed on frame {frame_idx}: {e}")
+
+            # Merge grounding + yolo detections and apply score threshold filter once
+            merged_detections = detections_grounding + yolo_detections
+            detections = grounding_filter(merged_detections, detection_config["box_threshold"])
+
             all_detections.append({
                 "frame_idx": frame_idx,
                 "detections": detections,

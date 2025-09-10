@@ -53,6 +53,7 @@ class BridgeNumpyDataset:
         load_gaze: bool = False,
         action_proprio_metadata: dict | None = None,
         sample_weights: List[float] | None = None,
+        saliency_alpha: float | None = None,
         **kwargs,
     ):
         self.rng = random.Random(seed)
@@ -66,6 +67,7 @@ class BridgeNumpyDataset:
         # horizons/configs
         self.act_pred_horizon = int(act_pred_horizon) if act_pred_horizon is not None else None
         self.obs_horizon = int(obs_horizon) if obs_horizon is not None else None
+        self.saliency_alpha = float(saliency_alpha) if saliency_alpha is not None else 1.0
         # augmentation configs
         self.augment = bool(augment)
         self.augment_next_obs_goal_differently = bool(augment_next_obs_goal_differently)
@@ -188,6 +190,41 @@ class BridgeNumpyDataset:
             },
             "actions": acts,
         }
+        # Optional: attach saliency (HWC float32, C=1). When obs_horizon>1, build causal aggregation with alpha^k
+        if "saliency" in obs:
+            if obs_h > 1:
+                t0 = max(0, t - (obs_h - 1))
+                alpha = float(self.saliency_alpha)
+                # accumulate s(t) + alpha^1*s(t-1) + ...
+                agg = None
+                for k in range(t, t0 - 1, -1):
+                    d = t - k
+                    w = (alpha ** d) if d > 0 else 1.0
+                    s = traj["observations"][k].get("saliency", None)
+                    if s is None:
+                        continue
+                    cur = (w * s).astype(np.float32)
+                    agg = cur if agg is None else (agg + cur)
+                if agg is None:
+                    agg = obs["saliency"].astype(np.float32)
+                # normalize to [0,1]
+                mn = float(agg.min())
+                mx = float(agg.max())
+                if mx > mn:
+                    agg = (agg - mn) / (mx - mn)
+                else:
+                    agg = np.zeros_like(agg, dtype=np.float32)
+                out["observations"]["saliency"] = agg
+            else:
+                # even for single frame, ensure normalization
+                s = obs["saliency"].astype(np.float32)
+                mn = float(s.min())
+                mx = float(s.max())
+                if mx > mn:
+                    s = (s - mn) / (mx - mn)
+                else:
+                    s = np.zeros_like(s, dtype=np.float32)
+                out["observations"]["saliency"] = s
         return out
 
     # --------- augmentation helpers (Albumentations) ---------
@@ -278,6 +315,19 @@ class BridgeNumpyDataset:
         else:
             raise ValueError(f"Unexpected observation image shape: {obs_img.shape}")
 
+    def _prepare_saliency_chw(self, sal: np.ndarray, replay: dict | None) -> torch.Tensor:
+        """Prepare saliency map as CHW float in [0,1]; apply same spatial augment via replay if provided."""
+        # sal is HWC with C=1 float32 in [0,1]
+        if sal.ndim != 3 or sal.shape[2] != 1:
+            raise ValueError(f"Unexpected saliency shape: {sal.shape}")
+        # 按用户要求：saliency 不做任何图像增强或几何变换
+        t = torch.as_tensor(sal.transpose(2, 0, 1), dtype=torch.float32)
+        # normalize per-map to [0,1]
+        mn = t.amin(dim=(-2, -1), keepdim=True)
+        mx = t.amax(dim=(-2, -1), keepdim=True)
+        t = (t - mn) / (mx - mn + 1e-8)
+        return t
+
     def _prepare_goal_chw(self, goal_img: np.ndarray, replay: dict | None) -> torch.Tensor:
         # goal_img is HWC uint8
         H, W = goal_img.shape[:2]
@@ -298,6 +348,7 @@ class BridgeNumpyDataset:
             # convert/augment per-sample, handling obs_horizon stacking
             obs_tensors: List[torch.Tensor] = []
             goal_tensors: List[torch.Tensor] = []
+            sal_tensors: List[torch.Tensor] = []
             for b in batch:
                 oimg = b["observations"]["image"]  # HWC or THWC uint8
                 gimg = b["goals"]["image"]  # HWC uint8
@@ -317,6 +368,11 @@ class BridgeNumpyDataset:
                             gt = gt[:ot.shape[0]]
                 obs_tensors.append(ot)
                 goal_tensors.append(gt)
+                # optional saliency per-sample
+                if "saliency" in b["observations"] and b["observations"]["saliency"] is not None:
+                    st = self._prepare_saliency_chw(b["observations"]["saliency"], None if self.augment_next_obs_goal_differently else params)
+                    # if obs has more channels (multi-frame), we keep saliency single-channel
+                    sal_tensors.append(st)
 
             acts = batch[0]["actions"]
             if isinstance(acts, np.ndarray) and acts.ndim == 1:
@@ -332,6 +388,9 @@ class BridgeNumpyDataset:
             if batch[0]["observations"]["proprio"] is not None:
                 prop = np.stack([b["observations"]["proprio"] for b in batch], axis=0)
                 obs_dict["proprio"] = _flatten_time_feat(prop)
+            # attach saliency if available for all samples
+            if sal_tensors and len(sal_tensors) == len(batch):
+                obs_dict["saliency"] = torch.stack(sal_tensors, dim=0).contiguous(memory_format=torch.channels_last)
 
             gdict = {"image": torch.stack(goal_tensors, dim=0).contiguous(memory_format=torch.channels_last)}
 

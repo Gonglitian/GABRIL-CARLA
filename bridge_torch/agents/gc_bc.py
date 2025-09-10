@@ -6,6 +6,10 @@ from typing import Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+try:
+    from vlm_gaze.data_utils.gaze_utils import get_gaze_mask
+except Exception:
+    get_gaze_mask = None
 
 
 class MLP(nn.Module):
@@ -123,6 +127,33 @@ class GCBCAgent:
                     self.scheduler = torch.optim.lr_scheduler.SequentialLR(self.optimizer, scheds, milestones=[cfg.warmup_steps])
         self.step = 0
 
+        # saliency variant
+        sal_cfg = {}
+        try:
+            if hasattr(cfg, "policy_kwargs") and isinstance(cfg.policy_kwargs, dict):
+                sal_cfg = dict(cfg.policy_kwargs.get("saliency", {}) or {})
+            if not sal_cfg:
+                sal_cfg = getattr(cfg, "saliency", {}) or {}
+        except Exception:
+            sal_cfg = getattr(cfg, "saliency", {}) or {}
+        self._saliency_enabled = bool(sal_cfg.get("enabled", False))
+        self._saliency_weight = float(sal_cfg.get("weight", 1.0))
+        self._saliency_beta = float(sal_cfg.get("beta", 1.0))
+        self._last_spatial = None
+        if self._saliency_enabled:
+            self._register_spatial_hook()
+
+    def _register_spatial_hook(self) -> None:
+        def _hook(_m, _i, out):
+            try:
+                if isinstance(out, torch.Tensor) and out.dim() == 4:
+                    self._last_spatial = out
+            except Exception:
+                pass
+            return None
+        for m in self.model.obs_encoder.modules():
+            m.register_forward_hook(_hook)
+
     def update(self, batch: Dict[str, torch.Tensor]):
         self.model.train()
         obs = {k: v.to(self.device, non_blocking=True) for k, v in batch["observations"].items() if isinstance(v, torch.Tensor)}
@@ -131,7 +162,20 @@ class GCBCAgent:
         out = self.model(obs, goal)
         dist = self.model.dist(out)
         log_prob = dist.log_prob(actions)
-        loss = -log_prob.mean()
+        actor_loss = -log_prob.mean()
+        reg_loss = torch.tensor(0.0, device=self.device)
+        if self._saliency_enabled and (get_gaze_mask is not None) and ("saliency" in obs):
+            try:
+                z_map = self._last_spatial
+                self._last_spatial = None
+                if z_map is not None and z_map.dim() == 4:
+                    target = obs["saliency"]
+                    H, W = int(target.shape[-2]), int(target.shape[-1])
+                    pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))
+                    reg_loss = F.mse_loss(pred, target)
+            except Exception:
+                pass
+        loss = actor_loss + self._saliency_weight * reg_loss
         with torch.no_grad():
             mse = F.mse_loss(out["mu"], actions, reduction="none").sum(-1).mean()
             mean_std = out["std"].mean(dim=1).mean()
@@ -146,7 +190,9 @@ class GCBCAgent:
         self.step += 1
 
         return {
-            "actor_loss": loss.item(),
+            "actor_loss": float(actor_loss.item()),
+            "saliency_reg": float(reg_loss.item()) if reg_loss is not None else 0.0,
+            "total_loss": float(loss.item()),
             "mse": mse.item(),
             "log_probs": log_prob.mean().item(),
             "mean_std": mean_std.item(),

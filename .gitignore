@@ -29,3 +29,10 @@ temp.ipynb
 *.log
 *.egg-info
 *.txt
+
+global_info/
+route_*/
+_generated/
+bdv2_inspect/
+backup/
+CLAUDE.md

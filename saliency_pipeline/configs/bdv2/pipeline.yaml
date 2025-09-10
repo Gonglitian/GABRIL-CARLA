@@ -1,0 +1,177 @@
+# Unified pipeline config for BDV2
+
+dataset:
+  type: bdv2
+  bdv2:
+    dataset_root: "/data3/vla-reasoning/dataset/bdv2"
+    frame_glob: "im_*.jpg"
+    
+
+run:
+  # bdv2_single | bdv2_task | bdv2_all
+  mode: bdv2_all
+  bdv2_single:
+    task: "open_microwave"
+    timestamp: "2022-03-12_14-48-28"
+    traj_group: "traj_group0"
+    traj_name: "traj0"
+    camera: 2
+  bdv2_task:
+    task: "open_microwave"
+    camera: 2
+  bdv2_all:
+    # 对 dataset_root 下所有任务遍历，使用同一相机索引
+    camera: 0
+
+processing:
+  seed: 42
+  max_frames: 999
+  frame_step: 1
+
+global_desc:
+  k_frames: 25
+  model: "Qwen/Qwen2.5-VL-72B-Instruct"
+  # Use SiliconFlow API instead of OpenAI
+  api_provider: "siliconflow"
+  fallback_models:
+    - "Qwen/Qwen2.5-VL-72B-Instruct"
+    - "Qwen/Qwen2.5-VL-32B-Instruct"
+    - "Qwen/Qwen2.5-VL-7B-Instruct"
+  output_dir: "/data3/vla-reasoning/bdv2_global_info"
+  result_filename: "result.json"
+  json_indent: 2
+  json_ensure_ascii: false
+  prompt_template: |
+     Objective:
+      The following is a video of a WidowX robotic arm operating trajectory.
+
+      1. First, understand the robot's task in this video.
+
+      2. Identify objects in the image that only interact with the robotic arm and output their descriptive keywords. Output must use the color + material + category format (for example: silver iron pot lid, blue plastic bowl, black robot gripper fingers). Do not include obstacles that the robotic arm may encounter during its trajectory.
+
+      3. Ignore irrelevant decorations and distant or uninterpreted backgrounds.
+
+      4. Ensure consistent naming style, using color + material + category throughout.
+
+      5. Material and color must be clearly defined: for example, silver iron, black plastic, blue ceramic. Omit material or color if uncertain.
+
+      6. The gripper/manipulator must be output, for example: black robot gripper fingers.
+
+      7. Components must be distinct: for example, a pot lid, cup handle, or knob should be output as pot lid, cup handle, stove knob, etc.
+
+      8. Output must strictly follow the JSON format and avoid redundant text:
+
+      {
+      "objects": [
+      {
+      "type": "<object_class or parent_part, e.g., microwave_handle, cup_handle, drawer_handle, stove_knob>",
+      "state": "<open|closed|filled|empty|on|off|unknown>",
+      "role": "<target|tool|container|support|obstacle|background>",
+      "affordance": "<open|close|grasp|place|pour|press|pull|push|turn|none>",
+      }
+      ],
+      "description": "<one-sentence action summary of what the robot/person is doing and key event>"
+      }
+
+  api:
+    timeout_seconds: 60
+    max_retries: 3
+
+vlm_filter:
+  enabled: false
+  model_id: "IDEA-Research/grounding-dino-base"
+  device: "cuda:1"
+  # Prompt 定制：可填写字符串或按域映射（如 {bdv2: "household manipulation", bench2drive: "autonomous driving"}）
+  prompt:
+    templates:
+      bdv2: |
+        You are analyzing a household manipulation scene: {task_context}.
+
+        Frame: {frame_id}
+        Global Intent: {global_context}
+        Action Intent: {action_context}
+
+        Candidates (normalized xyxy):
+        {candidates}
+
+        Task:
+        1) Based on the given bounding box and scene image, select the K objects most relevant to the robot successfully completing the task (sorted by track_id, including the robot gripper, the fewer the better, up to a maximum of three) to enable or block the current action.
+        2) Prioritize direct targets (e.g., doors/handles/buttons/knobs), tools/containers, direct supports, and direct obstacles.
+        3) If you believe there are potentially missing objects/parts in the current context, please list their classes for re-detection.
+        4) Return JSON format:
+        {
+        "top_k": [
+        {"id": <int>, "class": "<str>", "score": <float 0-1>, "rationale": "<short>"}
+        ],
+        "missing_suspects": ["<class>", ...]
+        }
+
+        Rules:
+        - Explicitly address key components (e.g., microwave handles, cabinet doors, button panels).
+        - Exclude distant/background items not relevant to the action. - "score" is the importance weight; an approximate value is sufficient; the ID is used for filtering.
+        - Returns only JSON (no extra text).
+  detection:
+    text_prompt: "knife. fork. cup. bottle. microwave. oven. fridge."
+    backend: "local"
+    use_existing_json: false
+    existing_base_dir: ""
+    existing_filename: "grounding_detections.json"
+    box_threshold: 0.5
+    text_threshold: 0.4
+    iou_threshold: 0.2
+  detail_level: "low"
+  max_redetect_iterations: 2
+  output:
+    base_output_dir: "/data3/vla-reasoning/bdv2_saliency_exp_results"
+    grounding_detections: "grounding_detections.json"
+    vlm_filtered_boxes: "vlm_filtered_boxes.json"
+    vlm_responses: "vlm_responses.json"
+    vlm_summary: "vlm_summary.json"
+  visualization:
+    fps: 20
+    vlm_annotated: "vlm_annotated"
+    tracking_annotated: "tracking_annotated"
+    vlm_gifs: "vlm_gifs"
+    tracking_gifs: "tracking_gifs"
+    gif_template_vlm: "{seed}_vlm_filtered.gif"
+    gif_template_tracking: "{seed}_tracking_only.gif"
+    box_thickness: 2
+    label_text_thickness: 1
+    label_text_scale: 0.5
+    tracking_label_scale: 0.5
+    font: "FONT_HERSHEY_SIMPLEX"
+    action_text_scale: 0.6
+    frame_info_scale: 0.5
+    tracking_info_scale: 0.5
+  api:
+    urls: []
+    urls_file: ""
+    timeout: 30
+    num_workers: 10
+  global_info:
+    use_dynamic_prompts: true
+    fallback_objects:
+      - "cup"
+      - "bottle"
+      - "utensils"
+      - "appliance"
+
+bbox_to_dataset:
+  overwrite: true
+  # If omitted, will fall back to vlm_filter.output.base_output_dir
+  saliency_results_dir: "/data3/vla-reasoning/bdv2_saliency_exp_results"
+  filenames:
+    grounding_detections: "grounding_detections.json"
+    vlm_filtered_boxes: "vlm_filtered_boxes.json"
+    non_filter_pt: "non_filter.pt" # no use in bdv2
+    filter_dynamic_pt: "filter_dynamic.pt" # no use in bdv2
+  pkl_filenames:
+    no_filter: "no_filter.pkl" # from grounding_detections.json
+    filter: "filter.pkl" # from vlm_filtered_boxes.json
+
+# API Configuration (shared, no model duplication here)
+api:
+  siliconflow:
+    base_url: "https://api.siliconflow.cn/v1"
+    api_key_env: "SILICONFLOW_API_KEY"
+    default_key: "sk-phmmfcunilixdfnseffavbdljrbcxgowpuuhmngxbfuwfrma"

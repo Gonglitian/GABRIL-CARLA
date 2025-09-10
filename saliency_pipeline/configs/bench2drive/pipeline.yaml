@@ -1,0 +1,163 @@
+# Unified pipeline config for Bench2Drive
+
+dataset:
+  type: bench2drive
+  bench2drive:
+    dataset_dir: "/data3/vla-reasoning/dataset/bench2drive220"
+
+run:
+  # single_seed | single_route | all
+  mode: all
+  single_seed:
+    route_id: 2416
+    seed_id: 200
+  single_route:
+    route_id: 2416
+
+processing:
+  seed: 42
+  max_frames: 999
+  frame_step: 1
+
+global_desc:
+  k_frames: 16
+  model: "Qwen/Qwen2.5-VL-72B-Instruct"
+  # Use SiliconFlow API instead of OpenAI
+  api_provider: "siliconflow"
+  fallback_models:
+    - "Qwen/Qwen2.5-VL-72B-Instruct"
+    - "Qwen/Qwen2.5-VL-32B-Instruct"
+    - "Qwen/Qwen2.5-VL-7B-Instruct"
+  output_dir: "/data3/vla-reasoning/global_desc_results"
+  result_filename: "result.json"
+  json_indent: 2
+  json_ensure_ascii: false
+  prompt_template: "Describe important objects and context for autonomous driving."
+  api:
+    timeout_seconds: 60
+    max_retries: 3
+
+vlm_filter:
+  model_id: "IDEA-Research/grounding-dino-base"
+  device: "cuda:0"
+  # Prompt 定制：可填写字符串或按域映射（如 {bdv2: "household manipulation", bench2drive: "autonomous driving"}）
+  prompt:
+    task_context: "autonomous driving"
+    templates:
+      bench2drive: |
+        You are analyzing a scene for autonomous driving.
+
+        Frame: {frame_id}
+        Global Intent: {global_context}
+        Action Intent: {action_context}
+
+        Candidates (normalized xyxy):
+        {candidates}
+
+        Task:
+        1) Select the top-K most relevant objects (<=3 by track_id) to safe driving and current intention.
+        2) For same class but different track_id, pick the one with highest importance now.
+        3) If you suspect missing categories for current frame, list them for re-detection.
+        4) Return JSON with this exact schema:
+        {
+          "top_k": [
+            {"id": <int>, "class": "<str>", "score": <float 0~1>, "rationale": "<short>"}
+          ],
+          "missing_suspects": ["<class>", ...]
+        }
+
+        Rules:
+        - Prioritize collision risks (in-path vehicles, close pedestrians/cyclists), rule-governing items (traffic_light/sign), and trajectory-relevant actors.
+        - "score" is an importance weight; approximate is fine; we only use ids for filtering.
+        - Return JSON only (no extra text).
+    # 可选：自定义 prompt 模板（使用占位符 {frame_id} / {global_context} / {action_context} / {candidates}）
+    # templates:
+    #   bench2drive: |
+    #     You are analyzing a scene for autonomous driving.
+    #
+    #     Frame: {frame_id}
+    #     Global Intent: {global_context}
+    #     Action Intent: {action_context}
+    #
+    #     Candidates (normalized xyxy):
+    #     {candidates}
+    #
+    #     Task:
+    #     1) Select the top-K most relevant objects (<=3 by track_id) to safe driving and current intention.
+    #     2) For same class but different track_id, pick the one with highest importance now.
+    #     3) If you suspect missing categories for current frame, list them for re-detection.
+    #     4) Return JSON with this exact schema:
+    #     {
+    #       "top_k": [
+    #         {"id": <int>, "class": "<str>", "score": <float 0~1>, "rationale": "<short>"}
+    #       ],
+    #       "missing_suspects": ["<class>", ...]
+    #     }
+    #
+    #     Rules:
+    #     - Prioritize collision risks (in-path vehicles, close pedestrians/cyclists), rule-governing items (traffic_light/sign), and trajectory-relevant actors.
+    #     - "score" is an importance weight; approximate is fine; we only use ids for filtering.
+    #     - Return JSON only (no extra text).
+  detection:
+    text_prompt: "car. person. traffic light. traffic sign. bicycle. motorcycle."
+    backend: "local"
+    use_existing_json: false
+    existing_base_dir: ""
+    existing_filename: "grounding_detections.json"
+    box_threshold: 0.4
+    text_threshold: 0.3
+    iou_threshold: 0.2
+  enabled: true
+  detail_level: "low"
+  max_redetect_iterations: 2
+  output:
+    base_output_dir: "/data3/vla-reasoning/saliency_exp_results"
+    grounding_detections: "grounding_detections.json"
+    vlm_filtered_boxes: "vlm_filtered_boxes.json"
+    vlm_responses: "vlm_responses.json"
+    vlm_summary: "vlm_summary.json"
+  visualization:
+    fps: 20
+    vlm_annotated: "vlm_annotated"
+    tracking_annotated: "tracking_annotated"
+    vlm_gifs: "vlm_gifs"
+    tracking_gifs: "tracking_gifs"
+    gif_template_vlm: "{seed}_vlm_filtered.gif"
+    gif_template_tracking: "{seed}_tracking_only.gif"
+    box_thickness: 2
+    label_text_thickness: 1
+    label_text_scale: 0.5
+    tracking_label_scale: 0.5
+    font: "FONT_HERSHEY_SIMPLEX"
+    action_text_scale: 0.6
+    frame_info_scale: 0.5
+    tracking_info_scale: 0.5
+  api:
+    urls: []
+    urls_file: ""
+    timeout: 30
+    num_workers: 10
+  global_info:
+    use_dynamic_prompts: true
+    fallback_objects:
+      - "traffic signal"
+      - "traffic sign"
+      - "vehicle"
+      - "pedestrians"
+      - "cyclists"
+
+bbox_to_dataset:
+  overwrite: true
+  saliency_results_dir: "/data3/vla-reasoning/saliency_exp_results"
+  filenames:
+    grounding_detections: "grounding_detections.json"
+    vlm_filtered_boxes: "vlm_filtered_boxes.json"
+    non_filter_pt: "non_filter.pt"
+    filter_dynamic_pt: "filter_dynamic.pt"
+
+# API Configuration (shared, no model duplication here)
+api:
+  siliconflow:
+    base_url: "https://api.siliconflow.cn/v1"
+    api_key_env: "SILICONFLOW_API_KEY"
+    default_key: "sk-phmmfcunilixdfnseffavbdljrbcxgowpuuhmngxbfuwfrma"

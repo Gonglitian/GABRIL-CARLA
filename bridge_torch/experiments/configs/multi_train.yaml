@@ -1,7 +1,7 @@
 # Torch multi-run example
 matrix:
   algos: ["gc_ddpm_bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
-  tasks: ["put_carrot_in_pot_100", "put_in_pot_lid_100","put_in_pot_lid_100"]  # 可改为以下任一 data_config 任务：
+  tasks: ["pull_pot_100"]  # 可改为以下任一 data_config 任务：
   #   - "lift_carrot_100"
   #   - "lift_carrot_100_confounded"
   #   - "pull_pot_100"
@@ -17,31 +17,24 @@ global:
   save_dir: /scr/litian/torch_runs
   # Training schedule
   train_batch_size: 2000
-  num_steps: 10000
-  save_interval: 1000
+  num_steps: 30000
+  save_interval: 10000
   log_interval: 10
   # Eval
   val_batch_size: 20
   eval_batches: null  # Set to null to skip evaluation completely
   eval_interval: 500
 
-  # 学习率调度策略（可选）
   # scheduler.type:
-  #   - "constant": 学习率恒定为 agent_kwargs.learning_rate
-  #   - "warmup_cosine": 先按 warmup_steps 线性预热，再按对应 *decay_steps* 余弦衰减
-  #     - 对 bc/gc_bc 使用 decay_steps_bc / decay_steps_gc_bc
-  #     - 对 gc_ddpm_bc 使用 actor_decay_steps_gc_ddpm_bc
+  #   - "constant"
+  #   - "warmup_cosine"
   scheduler:
     type: "warmup_cosine"
 
   warmup_steps: 500
-  # Default decay steps per algorithm (can override per-run)
-  decay_steps_bc: 10000
-  decay_steps_gc_bc: 10000
-  actor_decay_steps_gc_ddpm_bc: 10000
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "0,1,3,5"
+  cuda_visible_devices: "3,5,6,7"
 
   name_format: "{algo}_{task}"
   extra_args:
@@ -114,4 +107,3 @@ global:
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:
     project: "bridgedata_torch"
-

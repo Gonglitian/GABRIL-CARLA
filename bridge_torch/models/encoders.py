@@ -107,12 +107,33 @@ class ResNetV1Bridge(nn.Module):
 
 
 def build_encoder(name: str, **kwargs) -> nn.Module:
-    if name == "resnetv1-34-bridge":
-        # map to resnet34; drop kwargs not supported in torch port
-        kw = dict(kwargs)
-        kw.pop("act", None)
-        return ResNetV1Bridge(arch="resnet34", **kw)
-    # placeholder for film variant
-    if name == "resnetv1-34-bridge-film":
+    """Factory for encoders used in the torch port.
+
+    Supported names:
+      - "resnetv1-bridge" with kwarg "arch" in {"resnet18", "resnet34", "resnet50"}
+      - "resnetv1-18-bridge" (alias for arch="resnet18")
+      - "resnetv1-34-bridge" (alias for arch="resnet34")
+      - "resnetv1-50-bridge" (alias for arch="resnet50")
+    """
+
+    # Drop kwargs not supported in torch implementation but may appear from JAX configs
+    kw = dict(kwargs)
+    kw.pop("act", None)
+
+    if name == "resnetv1-bridge":
+        arch = kw.pop("arch", "resnet34")
+        return ResNetV1Bridge(arch=arch, **kw)
+
+    if name in {"resnetv1-18-bridge", "resnetv1-34-bridge", "resnetv1-50-bridge"}:
+        arch = {
+            "resnetv1-18-bridge": "resnet18",
+            "resnetv1-34-bridge": "resnet34",
+            "resnetv1-50-bridge": "resnet50",
+        }[name]
+        return ResNetV1Bridge(arch=arch, **kw)
+
+    # placeholder for film variant (not implemented)
+    if name.endswith("-film"):
         raise NotImplementedError("FILM variant not implemented in torch port yet")
+
     raise ValueError(f"Unknown encoder name: {name}")

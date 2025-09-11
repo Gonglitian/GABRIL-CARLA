@@ -1,15 +1,31 @@
 # Torch multi-run example
 matrix:
   algos: ["bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
-  tasks: ["lift_carrot_100", "lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100", "put_in_pot_lid_100"]  # 可改为以下任一 data_config 任务：
+  tasks: ["lift_carrot_100"]  # 可改为以下任一 data_config 任务：
+  # 可选：对 Saliency 的 weight 做笛卡尔积扫描（与 algos×tasks 以及 encoders/backbones 组合）
+  # saliency_weights: [0.0, 0.2, 0.5, 1.0]
+  # 可选：对数据集的 obs_horizon 做笛卡尔积扫描（与上面组合项一起展开）
+  # obs_horizons: [1, 2, 3]
   #   - "lift_carrot_100"
   #   - "lift_carrot_100_confounded"
   #   - "pull_pot_100"
   #   - "put_carrot_in_pot_100"
   #   - "put_in_pot_lid_100"
   #   - "remove_pot_lid_150"
+  # 可选：为不同 run 选择 encoder（与 algos×tasks 做笛卡尔积）
+  # 直接给出 encoder 名称（支持三种）：
+  encoders: ["resnetv1-34-bridge", "resnetv1-50-bridge"]
+  # 或仅给出 backbone（arch），内部将使用通用 "resnetv1-bridge" 并传递 encoder_kwargs.arch：
+  # backbones: ["resnet18", "resnet34", "resnet50"]
 
 global:
+  # 默认 encoder 及其参数（可被上面的 matrix.encoders / matrix.backbones 或 runs.* 覆盖）
+  encoder: "resnetv1-34-bridge"   # 也可设为 "resnetv1-bridge" 配合 encoder_kwargs.arch 指定
+  # encoder_kwargs:
+  #   pooling_method: "avg"          # "avg" 或 "none"
+  #   add_spatial_coordinates: true
+  #   arch: "resnet34"             # 若 encoder 设为 "resnetv1-bridge" 时使用
+
   saliency:
     enabled: false
     alpha: 0.7
@@ -39,11 +55,16 @@ global:
   warmup_steps: 3000
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "2,3,4,5"
+  cuda_visible_devices: "1,2,4,5"
 
   name_format: "{algo}_{task}"
   # 统一的 saliency 配置（global 生效）
+  # 额外 CLI 覆盖项（将直接追加到命令行）
+  extra_args:
+    # 通过 YAML 打开本体/目标编码器拼接的 proprio 输入
+    - "--config.agent_kwargs.use_proprio True"
 
+  
   # 数据集相关可选配置（将映射到 config.dataset_kwargs.*）
   dataset:
     # 观测时间窗口：按通道堆叠为 3*obs_horizon

@@ -315,24 +315,9 @@ python -m bridge_torch.experiments.train \
 
 如需我为你的数据根或 YAML 生成一份专用配置，请告知实际路径与期望 GPU 数，我可以顺手调整并验证一次运行。
 
-## 8. TODO（体检报告）
-
-以下事项可能影响性能/稳定性或可改进：
-
-- **学习率调度（BC/GC-BC）**：为 BC/GC-BC 加入 Linear warmup + Cosine；使 `warmup_steps/decay_steps` 生效，并在每步调用 `scheduler.step()`（DDPM 已具备）。
-- **动作/本体归一化（numpy 管线）**：将 `ACTION_PROPRIO_METADATA` 应用于 `actions`/`proprio` 标准化；训练回归标准化目标，推理阶段反标准化，避免量纲不匹配导致的不稳定。
-- **动作有界化（BC/GC-BC）**：实现 `tanh_squash_distribution`（TanhTransform 与 log_prob 修正）或在采样/输出处 clamp，与环境动作范围对齐（DDPM 采样已含 clamp）。
-- **多帧观测 `obs_horizon`**：核查图像多帧堆叠是否在通道维度生效并贯穿训练/评估流程；目标图像与观测在通道数对齐（重复策略）保持一致，必要时补充单元测试。
-- **多任务采样权重**：在 numpy 管线支持 `sample_weights` 以控制多任务混合比例，避免被忽略。
-- **DDP 数据分片（numpy）**：为 numpy 迭代器增加按 `rank` 的无重叠分片，减少样本重叠并提升有效吞吐。
-- **Checkpoint 扩充**：同时保存/恢复 optimizer（及 scheduler）状态，便于中断恢复与复现实验。
-- **全局随机种子**：设置 `numpy/torch/cuda` 种子与 `cudnn` 相关标志，提升复现性。
-- **性能优化（可选）**：AMP 混合精度；引入 DataLoader/多进程预处理或并行预取；调整日志/评估频率与 I/O 的权衡。
-- **文档/配置提示**：在 README/YAML 明示上述开关的默认行为与建议配置，降低踩坑概率。
-
 ---
 
-## 9. Saliency 训练变体（Reg，仅当提供 saliency_map 时可用）
+## 8. Saliency 训练变体（Reg，仅当提供 saliency_map 时可用）
 
 本分支支持“Saliency 辅助正则（Reg）”训练：从编码器最后一层卷积特征图 `z_map (B,C,Hf,Wf)` 生成上采样的注意力掩码（`get_gaze_mask(z_map, beta, (H,W)) → (B,1,H,W)`），与数据集中提供的单帧 `saliency`（同维度 `(B,1,H,W)`）做 MSE 作为 `reg_loss`，并以 `total = base_loss + weight * reg_loss` 优化。
 

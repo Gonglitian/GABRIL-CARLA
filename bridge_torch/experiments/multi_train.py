@@ -30,14 +30,111 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
     algo = run["algo"]
     task = run["task"]
 
-    # Determine run name; if global.saliency.enabled is true, append suffix
+    # Determine base run name
     sal = g.get("saliency", {}) or {}
-    if bool(sal.get("enabled", False)):
-        name = f"{algo}_{task}_saliency"
-    else:
-        name = run.get("name") or g.get("name_format", "{algo}_{task}").format(
-            algo=algo, task=task
-        )
+    name = run.get("name") or g.get("name_format", "{algo}_{task}").format(
+        algo=algo, task=task
+    )
+
+    # Build informative suffix from matrix/run config
+    suffix_parts: List[str] = []
+
+    # Helper: parse bool flag from extra_args (supports tokens like "--config.agent_kwargs.use_proprio True")
+    def _parse_bool_from_extra(extra_list: List[str] | None, key: str) -> bool | None:
+        if not extra_list:
+            return None
+        val: bool | None = None
+        for s in extra_list:
+            if key in s:
+                if " True" in s or s.endswith("True"):
+                    val = True
+                elif " False" in s or s.endswith("False"):
+                    val = False
+        return val
+
+    # use_proprio: prefer run.config_overrides -> run.extra_args -> global.extra_args
+    use_proprio: bool | None = None
+    co = run.get("config_overrides", {}) or {}
+    if "config.agent_kwargs.use_proprio" in co:
+        try:
+            use_proprio = bool(co["config.agent_kwargs.use_proprio"]) if isinstance(co["config.agent_kwargs.use_proprio"], bool) else str(co["config.agent_kwargs.use_proprio"]).lower() == "true"
+        except Exception:
+            use_proprio = None
+    if use_proprio is None:
+        use_proprio = _parse_bool_from_extra(run.get("extra_args"), "--config.agent_kwargs.use_proprio")
+    if use_proprio is None:
+        use_proprio = _parse_bool_from_extra(g.get("extra_args", []), "--config.agent_kwargs.use_proprio")
+    if use_proprio:
+        suffix_parts.append("proprio")
+
+    # saliency weight (run override or global)
+    def _sanitize_float_for_name(x: float | int | str) -> str:
+        s = str(x)
+        s = s.replace(".", "p")
+        return s
+
+    eff_weight = None
+    if "saliency_weight" in run and run["saliency_weight"] is not None:
+        eff_weight = run["saliency_weight"]
+    elif isinstance(run.get("saliency"), dict) and run["saliency"].get("weight") is not None:
+        eff_weight = run["saliency"]["weight"]
+    elif sal.get("weight") is not None:
+        eff_weight = sal["weight"]
+    if eff_weight is not None:
+        try:
+            # Attach only when > 0 or saliency enabled
+            if float(eff_weight) > 0 or bool(sal.get("enabled", False)):
+                suffix_parts.append(f"sw{_sanitize_float_for_name(eff_weight)}")
+        except Exception:
+            suffix_parts.append(f"sw{_sanitize_float_for_name(eff_weight)}")
+
+    # obs_horizon from per-run dataset override or global dataset
+    ds_run = run.get("dataset", {}) or {}
+    ds_global = g.get("dataset", {}) or {}
+    eff_obs = ds_run.get("obs_horizon", ds_global.get("obs_horizon"))
+    if eff_obs is not None:
+        try:
+            suffix_parts.append(f"obs{int(eff_obs)}")
+        except Exception:
+            pass
+
+    # backbone/encoder arch
+    arch: str | None = None
+    # Priority: run.backbone -> run.encoder_kwargs.arch -> run.encoder alias -> global.encoder_kwargs.arch -> global.encoder alias
+    if run.get("backbone"):
+        arch = str(run["backbone"]).lower()
+    elif isinstance(run.get("encoder_kwargs"), dict) and run["encoder_kwargs"].get("arch"):
+        arch = str(run["encoder_kwargs"]["arch"]).lower()
+    elif run.get("encoder"):
+        enc = str(run["encoder"]).lower()
+        if "-18-" in enc:
+            arch = "resnet18"
+        elif "-34-" in enc:
+            arch = "resnet34"
+        elif "-50-" in enc:
+            arch = "resnet50"
+    if arch is None:
+        ekg = g.get("encoder_kwargs", {}) or {}
+        if ekg.get("arch"):
+            arch = str(ekg["arch"]).lower()
+        else:
+            eg = str(g.get("encoder", "")).lower()
+            if "-18-" in eg:
+                arch = "resnet18"
+            elif "-34-" in eg:
+                arch = "resnet34"
+            elif "-50-" in eg:
+                arch = "resnet50"
+    if arch:
+        if arch.endswith("18"):
+            suffix_parts.append("res18")
+        elif arch.endswith("34"):
+            suffix_parts.append("res34")
+        elif arch.endswith("50"):
+            suffix_parts.append("res50")
+
+    if suffix_parts:
+        name = f"{name}_" + "_".join(suffix_parts)
 
     base_args = [
         "--name",
@@ -137,6 +234,29 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
             if "beta" in sal and sal["beta"] is not None:
                 cfg_overrides["config.agent_kwargs.saliency.beta"] = str(sal["beta"])
 
+    # Per-run saliency overrides: allow a single scalar weight sweep or full dict
+    if "saliency_weight" in run and run["saliency_weight"] is not None:
+        if algo in {"bc", "gc_bc"}:
+            cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.weight"] = str(run["saliency_weight"])
+        elif algo == "gc_ddpm_bc":
+            cfg_overrides["config.agent_kwargs.saliency.weight"] = str(run["saliency_weight"])
+    if "saliency" in run and isinstance(run["saliency"], dict):
+        rsal = run["saliency"]
+        if algo in {"bc", "gc_bc"}:
+            if "enabled" in rsal:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.enabled"] = str(bool(rsal["enabled"]))
+            if "weight" in rsal and rsal["weight"] is not None:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.weight"] = str(rsal["weight"])
+            if "beta" in rsal and rsal["beta"] is not None:
+                cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.beta"] = str(rsal["beta"])
+        elif algo == "gc_ddpm_bc":
+            if "enabled" in rsal:
+                cfg_overrides["config.agent_kwargs.saliency.enabled"] = str(bool(rsal["enabled"]))
+            if "weight" in rsal and rsal["weight"] is not None:
+                cfg_overrides["config.agent_kwargs.saliency.weight"] = str(rsal["weight"])
+            if "beta" in rsal and rsal["beta"] is not None:
+                cfg_overrides["config.agent_kwargs.saliency.beta"] = str(rsal["beta"])
+
     # Pass through global knobs: amp / compile / dataloader / profiler / scheduler / wandb
     for knob_key in ("amp", "compile", "dataloader", "profiler", "scheduler", "wandb"):
         knob = g.get(knob_key)
@@ -144,6 +264,31 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
             flat: Dict[str, Any] = {}
             _flatten(f"config.{knob_key}", knob, flat)
             cfg_overrides.update(flat)
+
+    # Encoder selection (global and per-run overrides)
+    # Allow YAML to specify either explicit encoder name or backbone via encoder_kwargs.arch
+    enc_global = g.get("encoder")
+    enc_kwargs_global = g.get("encoder_kwargs", {}) or {}
+    if enc_global:
+        cfg_overrides["config.encoder"] = enc_global
+    if enc_kwargs_global:
+        enc_kw_flat: Dict[str, Any] = {}
+        _flatten("config.encoder_kwargs", enc_kwargs_global, enc_kw_flat)
+        cfg_overrides.update(enc_kw_flat)
+
+    # Per-run encoder override
+    if "encoder" in run:
+        cfg_overrides["config.encoder"] = run["encoder"]
+    if "encoder_kwargs" in run and run["encoder_kwargs"]:
+        enc_kw_flat_r: Dict[str, Any] = {}
+        _flatten("config.encoder_kwargs", run["encoder_kwargs"], enc_kw_flat_r)
+        cfg_overrides.update(enc_kw_flat_r)
+
+    # Support shorthand per-run backbone field (e.g., resnet18/34/50)
+    if "backbone" in run and run["backbone"]:
+        # Use generic builder name and pass arch via encoder_kwargs.arch if not explicitly set
+        cfg_overrides.setdefault("config.encoder", "resnetv1-bridge")
+        cfg_overrides["config.encoder_kwargs.arch"] = run["backbone"]
 
     args = base_args + to_flag_list(cfg_overrides)
 
@@ -182,7 +327,37 @@ def main() -> None:
         matrix = cfg.get("matrix", {})
         algos = matrix.get("algos", [])
         tasks = matrix.get("tasks", [])
-        runs = [{"algo": a, "task": t} for a in algos for t in tasks]
+        encoders = matrix.get("encoders")  # explicit encoder names
+        backbones = matrix.get("backbones")  # shorthand backbone arch names
+        saliency_weights = matrix.get("saliency_weights")  # list of scalars to sweep
+        obs_horizons = matrix.get("obs_horizons")  # list of ints to sweep dataset obs_horizon
+
+        if encoders:
+            runs = [{"algo": a, "task": t, "encoder": e} for a in algos for t in tasks for e in encoders]
+        elif backbones:
+            runs = [{"algo": a, "task": t, "backbone": b} for a in algos for t in tasks for b in backbones]
+        else:
+            runs = [{"algo": a, "task": t} for a in algos for t in tasks]
+
+        if saliency_weights:
+            expanded = []
+            for r in runs:
+                for w in saliency_weights:
+                    r2 = dict(r)
+                    r2["saliency_weight"] = w
+                    expanded.append(r2)
+            runs = expanded
+
+        if obs_horizons:
+            expanded = []
+            for r in runs:
+                for oh in obs_horizons:
+                    r2 = dict(r)
+                    ds = dict(r2.get("dataset", {}))
+                    ds["obs_horizon"] = int(oh)
+                    r2["dataset"] = ds
+                    expanded.append(r2)
+            runs = expanded
 
     if not runs:
         print("[WARN] No runs defined in YAML; exiting.", file=sys.stderr)

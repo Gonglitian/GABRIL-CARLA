@@ -95,6 +95,26 @@ class BridgeNumpyDataset:
             return out
         self.augment_kwargs = _canon_dict(augment_kwargs or {})
         self.apm = action_proprio_metadata
+        # 解析标准化统计量（若提供）
+        self._act_mean = None
+        self._act_std = None
+        self._prop_mean = None
+        self._prop_std = None
+        try:
+            if isinstance(self.apm, dict):
+                act_meta = dict(self.apm.get("action", {}) or {})
+                prop_meta = dict(self.apm.get("proprio", {}) or {})
+                if ("mean" in act_meta) and ("std" in act_meta):
+                    self._act_mean = np.asarray(act_meta["mean"], dtype=np.float32)
+                    self._act_std = np.asarray(act_meta["std"], dtype=np.float32)
+                if ("mean" in prop_meta) and ("std" in prop_meta):
+                    self._prop_mean = np.asarray(prop_meta["mean"], dtype=np.float32)
+                    self._prop_std = np.asarray(prop_meta["std"], dtype=np.float32)
+        except Exception:
+            self._act_mean = None
+            self._act_std = None
+            self._prop_mean = None
+            self._prop_std = None
 
         # Load trajectories from all paths. Each path is a directory like <task>/<split>/out.npy
         self.trajs: List[dict] = []
@@ -176,6 +196,35 @@ class BridgeNumpyDataset:
         else:
             acts = act
 
+        # 归一化动作（若提供 mean/std）— 对齐 JAX 数据管线默认的 normal 标准化
+        if self._act_mean is not None and self._act_std is not None:
+            try:
+                acts = (acts - self._act_mean) / (self._act_std + 1e-8)
+            except Exception:
+                try:
+                    acts = (acts - self._act_mean[None, ...]) / (self._act_std[None, ...] + 1e-8)
+                except Exception:
+                    pass
+
+        # 归一化 proprio（若存在）
+        if prop_seq is not None and (self._prop_mean is not None) and (self._prop_std is not None):
+            try:
+                prop_seq = (prop_seq - self._prop_mean) / (self._prop_std + 1e-8)
+            except Exception:
+                try:
+                    prop_seq = (prop_seq - np.asarray(self._prop_mean, dtype=np.float32)) / (np.asarray(self._prop_std, dtype=np.float32) + 1e-8)
+                except Exception:
+                    pass
+        next_prop = next_obs.get("state", None)
+        if next_prop is not None and (self._prop_mean is not None) and (self._prop_std is not None):
+            try:
+                next_prop = (np.asarray(next_prop, dtype=np.float32) - self._prop_mean) / (self._prop_std + 1e-8)
+            except Exception:
+                try:
+                    next_prop = (np.asarray(next_prop, dtype=np.float32) - np.asarray(self._prop_mean, dtype=np.float32)) / (np.asarray(self._prop_std, dtype=np.float32) + 1e-8)
+                except Exception:
+                    pass
+
         out = {
             "observations": {
                 "image": obs_img,
@@ -183,7 +232,7 @@ class BridgeNumpyDataset:
             },
             "next_observations": {
                 "image": next_obs["images0"],
-                "proprio": next_obs.get("state", None),
+                "proprio": next_prop,
             },
             "goals": {
                 "image": goal_img,

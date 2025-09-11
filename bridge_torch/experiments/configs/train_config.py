@@ -114,7 +114,12 @@ def get_config(config_string):
                 ),
                 encoder="resnetv1-34-bridge",
                 encoder_kwargs=dict(
-                    pooling_method="avg", add_spatial_coordinates=True, act="swish"
+                    pooling_method="avg",
+                    add_spatial_coordinates=True,
+                    act="swish",
+                    # default backbone arch to allow CLI overrides like
+                    # --config.encoder_kwargs.arch resnet50
+                    arch="resnet34",
                 ),
                 **base_real_config,
             )
@@ -155,7 +160,10 @@ def get_config(config_string):
                 ),
                 encoder="resnetv1-34-bridge",
                 encoder_kwargs=dict(
-                    pooling_method="avg", add_spatial_coordinates=True, act="swish"
+                    pooling_method="avg",
+                    add_spatial_coordinates=True,
+                    act="swish",
+                    arch="resnet34",
                 ),
                 **base_real_config,
             )
@@ -201,7 +209,10 @@ def get_config(config_string):
                 ),
                 encoder="resnetv1-34-bridge",
                 encoder_kwargs=dict(
-                    pooling_method="avg", add_spatial_coordinates=True, act="swish"
+                    pooling_method="avg",
+                    add_spatial_coordinates=True,
+                    act="swish",
+                    arch="resnet34",
                 ),
                 **base_real_config,
             )

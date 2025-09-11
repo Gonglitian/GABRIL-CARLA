@@ -141,7 +141,15 @@ class BCAgent:
             self._register_spatial_hook()
 
     def _register_spatial_hook(self) -> None:
-        """Register forward hooks on encoder to capture the last 4D activation (B,C,H,W)."""
+        """Register a hook to capture pre-pool spatial features (B,C,H,W).
+
+        Capturing the encoder's last 4D output by iterating all modules can
+        accidentally latch onto post-pooling activations (e.g., (B,C,1,1)),
+        which destroys spatial information and yields degenerate saliency maps.
+        Here we prefer the output of the encoder's spatial stage before pooling
+        when available (e.g., `add_coords` or `stem` for ResNetV1Bridge).
+        """
+
         def _hook(_module, _inp, out):
             try:
                 if isinstance(out, torch.Tensor) and out.dim() == 4:
@@ -149,8 +157,21 @@ class BCAgent:
             except Exception:
                 pass
             return None
-        for m in self.model.encoder.modules():
-            m.register_forward_hook(_hook)
+
+        enc = getattr(self.model, "encoder", None)
+        m_to_hook = None
+        # Prefer hooking right before pooling in ResNetV1Bridge
+        if enc is not None:
+            # If the encoder exposes an `add_coords` block, it's right before pooling
+            if hasattr(enc, "add_coords") and isinstance(getattr(enc, "add_coords"), nn.Module):
+                m_to_hook = enc.add_coords
+            # Otherwise, fall back to the stem output
+            elif hasattr(enc, "stem") and isinstance(getattr(enc, "stem"), nn.Module):
+                m_to_hook = enc.stem
+        # As a final fallback, register on the encoder itself
+        if m_to_hook is None:
+            m_to_hook = enc if isinstance(enc, nn.Module) else self.model.encoder
+        m_to_hook.register_forward_hook(_hook)
 
     def update(self, batch: Dict[str, torch.Tensor]):
         self.model.train()

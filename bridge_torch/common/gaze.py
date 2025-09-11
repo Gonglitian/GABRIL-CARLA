@@ -13,43 +13,43 @@ def get_gaze_mask(
 ) -> torch.Tensor:
     """Compute a saliency map from last spatial feature maps.
 
+    对齐 vlm_gaze 的实现：通道求绝对值和 → 以 beta 为温度的 softmax → 上采样 → 归一化到 [0,1]。
+
     Args:
-        spatial_features: Tensor of shape (B, C, H, W), encoder spatial activations.
-        beta: Sharpness/temperature parameter (>0). Values >1 sharpen, <1 smooth.
-        out_hw: Optional (H_out, W_out). If provided, result is resized to this size.
+        spatial_features: (B, C, H, W) encoder 空间激活
+        beta: softmax 温度（越小越尖锐；与对侧一致）
+        out_hw: 可选输出尺寸 (H_out, W_out)
 
     Returns:
-        Tensor of shape (B, 1, H*, W*) with values in [0, 1].
+        (B, 1, H*, W*)，范围 [0,1]
     """
     if not isinstance(spatial_features, torch.Tensor):
         raise TypeError("spatial_features must be a torch.Tensor")
     if spatial_features.dim() != 4:
         raise ValueError(f"Expected (B,C,H,W), got {tuple(spatial_features.shape)}")
 
-    # Aggregate channel responses to a single-channel importance map per sample
-    # Use mean absolute activation as a simple, stable proxy
-    sal = spatial_features.abs().mean(dim=1, keepdim=True)  # (B,1,H,W)
+    # 1) 通道聚合（与 vlm_gaze 相同：abs 后在通道维求和）
+    z = spatial_features.abs().sum(dim=1)  # (B, H, W)
 
-    # Normalize per-sample to [0,1]
-    mn = sal.amin(dim=(-2, -1), keepdim=True)
-    mx = sal.amax(dim=(-2, -1), keepdim=True)
-    sal = (sal - mn) / (mx - mn + 1e-8)
+    # 2) 温度化 softmax（按像素展平后做 softmax，再还原形状）
+    B, Hf, Wf = z.shape
+    zf = z.view(B, Hf * Wf)
+    # 与对侧一致：使用 z / beta 作为温度化 softmax 输入
+    beta_safe = float(beta) if isinstance(beta, (int, float)) else 1.0
+    zf = torch.nn.functional.softmax(zf / max(beta_safe, 1e-8), dim=-1)
+    sal = zf.view(B, 1, Hf, Wf)  # (B,1,Hf,Wf)
 
-    # Apply sharpness control
-    try:
-        b = float(beta)
-    except Exception:
-        b = 1.0
-    if b > 0 and abs(b - 1.0) > 1e-6:
-        sal = sal.pow(b)
-
-    # Optional resize to target spatial size
+    # 3) 上采样到目标分辨率（若指定）
     if out_hw is not None:
-        H, W = int(out_hw[0]), int(out_hw[1])
-        if H > 0 and W > 0 and (H != sal.shape[-2] or W != sal.shape[-1]):
-            sal = F.interpolate(sal, size=(H, W), mode="bilinear", align_corners=False)
+        Ho, Wo = int(out_hw[0]), int(out_hw[1])
+        if Ho > 0 and Wo > 0 and (Ho != Hf or Wo != Wf):
+            sal = F.interpolate(sal, size=(Ho, Wo), mode="bicubic", align_corners=False)
 
-    # Ensure [0,1]
+    # 4) 再次做稳健归一化到 [0,1]
+    flat = sal.view(B, 1, -1)
+    mx = flat.max(dim=-1).values.view(B, 1, 1, 1)
+    mn = flat.min(dim=-1).values.view(B, 1, 1, 1)
+    sal = (sal - mn) / (mx - mn + 1e-8)
     sal = sal.clamp_(0.0, 1.0)
     return sal
 

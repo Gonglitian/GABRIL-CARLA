@@ -238,8 +238,12 @@ def build_run_args(run: Dict[str, Any], g: Dict[str, Any]) -> List[str]:
     if "saliency_weight" in run and run["saliency_weight"] is not None:
         if algo in {"bc", "gc_bc"}:
             cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.weight"] = str(run["saliency_weight"])
+            # Auto-enable saliency when weight is explicitly set via matrix sweep
+            cfg_overrides["config.agent_kwargs.policy_kwargs.saliency.enabled"] = "true"
         elif algo == "gc_ddpm_bc":
             cfg_overrides["config.agent_kwargs.saliency.weight"] = str(run["saliency_weight"])
+            # Auto-enable saliency when weight is explicitly set via matrix sweep
+            cfg_overrides["config.agent_kwargs.saliency.enabled"] = "true"
     if "saliency" in run and isinstance(run["saliency"], dict):
         rsal = run["saliency"]
         if algo in {"bc", "gc_bc"}:
@@ -371,6 +375,10 @@ def main() -> None:
     ddp_cfg = g.get("ddp", {}) or {}
     ddp_enabled = bool(ddp_cfg.get("enabled", False))
     nproc = int(ddp_cfg.get("nproc_per_node", 0))
+    if ddp_enabled:
+        # Ensure IPv4 localhost to avoid AF_INET6 issues on some hosts
+        base_env.setdefault("MASTER_ADDR", "127.0.0.1")
+        base_env.setdefault("MASTER_PORT", "29500")
 
     for i, run in enumerate(runs, 1):
         run_args = build_run_args(run, g)

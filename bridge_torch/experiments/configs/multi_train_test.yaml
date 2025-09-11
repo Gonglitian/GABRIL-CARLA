@@ -67,15 +67,12 @@ global:
     augment: true
     augment_next_obs_goal_differently: false
     augment_kwargs:
-      random_resized_crop:
-        scale: [0.8, 1.0]
-        ratio: [0.9, 1.1]
+      # 关闭空间类增强（去掉 random_resized_crop），仅保留颜色增强
       random_brightness: [0.2]
       random_contrast: [0.8, 1.2]
       random_saturation: [0.8, 1.2]
       random_hue: [0.1]
       augment_order:
-        - random_resized_crop
         - random_brightness
         - random_contrast
         - random_saturation
@@ -123,4 +120,3 @@ global:
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:
     project: "bridgedata_torch"
-

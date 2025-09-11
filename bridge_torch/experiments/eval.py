@@ -87,10 +87,19 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: O
             cfg = json.load(f)
     # build agent/model
     agent, kind, obs_horizon, act_pred_horizon = _build_agent_from_config(cfg, device, im_size)
-    # load action metadata
+    # load action/proprio metadata for normalization
     action_proprio_metadata = cfg.get("bridgedata_config", {}).get("action_proprio_metadata")
     action_mean = np.array(action_proprio_metadata["action"]["mean"]) if action_proprio_metadata else np.zeros(7, dtype=np.float32)
     action_std = np.array(action_proprio_metadata["action"]["std"]) if action_proprio_metadata else np.ones(7, dtype=np.float32)
+    proprio_mean = None
+    proprio_std = None
+    try:
+        if action_proprio_metadata and ("proprio" in action_proprio_metadata):
+            proprio_mean = np.array(action_proprio_metadata["proprio"].get("mean"))
+            proprio_std = np.array(action_proprio_metadata["proprio"].get("std"))
+    except Exception:
+        print("No proprio metadata found")
+        proprio_mean, proprio_std = None, None
     # hydrate agent weights, stripping compiled prefixes like "_orig_mod."
     payload = torch.load(ckpt_path, map_location=device)
     model_to_load = agent.model.module if hasattr(agent.model, "module") else agent.model
@@ -112,6 +121,8 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: O
         "obs_horizon": obs_horizon,
         "act_pred_horizon": act_pred_horizon,
         "ckpt_path": ckpt_path,
+        "proprio_mean": proprio_mean,
+        "proprio_std": proprio_std,
     }
 
 
@@ -256,7 +267,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     return agent, get_action_kind, obs_horizon, act_pred_horizon
 
 
-def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.ndarray, action_std: np.ndarray):
+def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.ndarray, action_std: np.ndarray, proprio_mean: Optional[np.ndarray], proprio_std: Optional[np.ndarray]):
     @torch.no_grad()
     def get_action(obs: Dict[str, np.ndarray], goal_obs: Dict[str, np.ndarray]):
         # convert to torch batch
@@ -284,7 +295,17 @@ def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.nda
                 img_t = img_t.unsqueeze(0)
             batch_obs["image"] = img_t.to(device)
         if "proprio" in obs and obs["proprio"] is not None:
-            prop = torch.from_numpy(obs["proprio"]).float().unsqueeze(0).to(device)
+            prop_np = obs["proprio"]
+            try:
+                if proprio_mean is not None and proprio_std is not None:
+                    prop_np = (prop_np - proprio_mean) / (proprio_std + 1e-8)
+            except Exception:
+                # best-effort broadcasting for (T,P)
+                try:
+                    prop_np = (prop_np - proprio_mean[None, ...]) / (proprio_std[None, ...] + 1e-8)
+                except Exception:
+                    pass
+            prop = torch.from_numpy(prop_np).float().unsqueeze(0).to(device)
             batch_obs["proprio"] = prop
 
         batch_goal: Dict[str, torch.Tensor] = {}
@@ -406,7 +427,15 @@ def main():
     picked = _load_policy(chosen_run, device, args.im_size, ckpt_path=chosen_ckpt)
 
     # build get_action wrapper for picked policy
-    get_action = _build_get_action(picked["agent"], picked["kind"], args.deterministic, picked["action_mean"], picked["action_std"])
+    get_action = _build_get_action(
+        picked["agent"],
+        picked["kind"],
+        args.deterministic,
+        picked["action_mean"],
+        picked["action_std"],
+        picked.get("proprio_mean"),
+        picked.get("proprio_std"),
+    )
     obs_horizon = picked["obs_horizon"]
     act_pred_horizon = picked["act_pred_horizon"]
 

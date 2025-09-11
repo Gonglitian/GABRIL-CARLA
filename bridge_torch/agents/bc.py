@@ -165,16 +165,12 @@ class BCAgent:
         if self._saliency_enabled and ("saliency" in obs):
             try:
                 z_map = self._last_spatial  # (B,C,Hf,Wf)
-                print("zmap", z_map)
                 self._last_spatial = None  # reset for next step
                 if z_map is not None and z_map.dim() == 4:
                     target = obs["saliency"]  # (B,1,H,W)
-                    print("target", target)
                     H, W = int(target.shape[-2]), int(target.shape[-1])
                     pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))  # (B,1,H,W)
-                    print("pred", pred)
                     reg_loss = F.mse_loss(pred, target)
-                    print("reg_loss", reg_loss)
             except Exception as e:
                 print(e)
         loss = actor_loss + self._saliency_weight * reg_loss

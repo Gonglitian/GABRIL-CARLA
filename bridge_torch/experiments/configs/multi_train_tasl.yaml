@@ -10,6 +10,11 @@ matrix:
   #   - "remove_pot_lid_150"
 
 global:
+  saliency:
+    enabled: false
+    alpha: 0.7
+    beta: 1.0
+    weight: 0.2
   # Paths
   # data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
   # save_dir: /data3/vla-reasoning/exp/bdv2_runs_0908
@@ -34,15 +39,10 @@ global:
   warmup_steps: 3000
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "1,2,4,5"
+  cuda_visible_devices: "2,3,4,5"
 
   name_format: "{algo}_{task}"
   # 统一的 saliency 配置（global 生效）
-  saliency:
-    enabled: true
-    alpha: 1.0
-    beta: 1.0
-    weight: 0.2
 
   # 数据集相关可选配置（将映射到 config.dataset_kwargs.*）
   dataset:

@@ -174,7 +174,6 @@ class GCBCAgent:
         if self._saliency_enabled and (get_gaze_mask is not None) and ("saliency" in obs):
             try:
                 z_map = self._last_spatial
-                print("zmap", self._last_spatial)
                 self._last_spatial = None
                 if z_map is not None and z_map.dim() == 4:
                     target = obs["saliency"]

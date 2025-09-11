@@ -38,7 +38,15 @@ class WidowXConfigs:
 
     DefaultActionConfig = ActionConfig(
         port_number=5556,
-        action_keys=["init", "move", "gripper", "reset", "step_action", "reboot_motor"],
+        action_keys=[
+            "init",
+            "move",
+            "gripper",
+            "reset",
+            "step_action",
+            "reboot_motor",
+            "neutral",
+        ],
         observation_keys=["image", "state", "full_image"],
         broadcast_port=5556 + 1,
     )
@@ -86,6 +94,7 @@ class WidowXActionServer():
             "step_action": self.__step_action,
             "reset": self.__reset,
             "reboot_motor": self.__reboot_motor,
+            "neutral": self.__neutral,
         }
 
     def start(self, threaded: bool = False):
@@ -216,6 +225,19 @@ class WidowXActionServer():
         self.bridge_env.step(payload["action"], blocking=payload["blocking"])
         return WidowXStatus.SUCCESS
 
+    def __neutral(self, payload) -> WidowXStatus:
+        """Move robot to its neutral pose.
+        Optional payload keys:
+          - duration: float seconds (default 1.5)
+        """
+        duration = payload.get("duration", 1.5)
+        try:
+            self.bridge_env.move_to_neutral(duration=duration)
+        except Exception as e:
+            print_red(f"Neutral execution error: {e}")
+            return WidowXStatus.EXECUTION_FAILURE
+        return WidowXStatus.SUCCESS
+
     def __reset(self, payload) -> WidowXStatus:
         # NOTE(YL): in bridge env, the entire process is very stateful,
         #           even reset might not be enough to reset the state
@@ -296,6 +318,11 @@ class WidowXClient():
     def reset(self) -> WidowXStatus:
         """Reset the arm to the neutral position."""
         res = self.__client.act("reset", {})
+        return WidowXStatus.NO_CONNECTION if res is None else res["status"]
+
+    def go_to_neutral(self, duration: float = 1.5) -> WidowXStatus:
+        """Command the server to move robot to neutral pose."""
+        res = self.__client.act("neutral", {"duration": duration})
         return WidowXStatus.NO_CONNECTION if res is None else res["status"]
 
     def get_observation(self) -> Optional[dict]:

@@ -100,7 +100,7 @@ def main():
     p.add_argument("--augment", action="store_true")
     p.add_argument("--augment_next_obs_goal_differently", action="store_true")
     p.add_argument("--saliency_alpha", type=float, default=1.0)
-    p.add_argument("--action_proprio_meta", type=str, default=None,
+    p.add_argument("--action_proprio_meta", type=str, default="/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/bridge_torch/data/amp.json",
                    help="Optional JSON with action/proprio mean/std (proprio-only normalization used)")
 
     args = p.parse_args()

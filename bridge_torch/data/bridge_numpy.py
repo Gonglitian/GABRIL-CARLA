@@ -95,26 +95,6 @@ class BridgeNumpyDataset:
             return out
         self.augment_kwargs = _canon_dict(augment_kwargs or {})
         self.apm = action_proprio_metadata
-        # 解析标准化统计量（若提供）
-        self._act_mean = None
-        self._act_std = None
-        self._prop_mean = None
-        self._prop_std = None
-        try:
-            if isinstance(self.apm, dict):
-                act_meta = dict(self.apm.get("action", {}) or {})
-                prop_meta = dict(self.apm.get("proprio", {}) or {})
-                if ("mean" in act_meta) and ("std" in act_meta):
-                    self._act_mean = np.asarray(act_meta["mean"], dtype=np.float32)
-                    self._act_std = np.asarray(act_meta["std"], dtype=np.float32)
-                if ("mean" in prop_meta) and ("std" in prop_meta):
-                    self._prop_mean = np.asarray(prop_meta["mean"], dtype=np.float32)
-                    self._prop_std = np.asarray(prop_meta["std"], dtype=np.float32)
-        except Exception:
-            self._act_mean = None
-            self._act_std = None
-            self._prop_mean = None
-            self._prop_std = None
 
         # Load trajectories from all paths. Each path is a directory like <task>/<split>/out.npy
         self.trajs: List[dict] = []
@@ -195,25 +175,10 @@ class BridgeNumpyDataset:
             acts = np.stack([traj["actions"][k] for k in range(t, t_end + 1)], axis=0).astype(np.float32)
         else:
             acts = act
-
-        # # 归一化 proprio（若存在）
-        # if prop_seq is not None and (self._prop_mean is not None) and (self._prop_std is not None):
-        #     try:
-        #         prop_seq = (prop_seq - self._prop_mean) / (self._prop_std + 1e-8)
-        #     except Exception:
-        #         try:
-        #             prop_seq = (prop_seq - np.asarray(self._prop_mean, dtype=np.float32)) / (np.asarray(self._prop_std, dtype=np.float32) + 1e-8)
-        #         except Exception:
-        #             pass
+        # Do not normalize actions or proprio: keep raw values for training
+        # (acts kept as-is; prop_seq kept as-is)
         next_prop = next_obs.get("state", None)
-        # if next_prop is not None and (self._prop_mean is not None) and (self._prop_std is not None):
-        #     try:
-        #         next_prop = (np.asarray(next_prop, dtype=np.float32) - self._prop_mean) / (self._prop_std + 1e-8)
-        #     except Exception:
-        #         try:
-        #             next_prop = (np.asarray(next_prop, dtype=np.float32) - np.asarray(self._prop_mean, dtype=np.float32)) / (np.asarray(self._prop_std, dtype=np.float32) + 1e-8)
-        #         except Exception:
-        #             pass
+        # Keep next_prop raw as well (no normalization)
 
         out = {
             "observations": {

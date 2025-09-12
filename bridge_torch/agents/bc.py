@@ -113,24 +113,27 @@ class BCAgent:
         self.step = 0
 
         # Saliency-variant config (optional, from YAML)
-        # tolerate ml_collections.ConfigDict or plain dict
+        # Check both cfg.saliency (direct) and policy_kwargs.saliency (legacy)
         sal_cfg = {}
         try:
-            pk = getattr(cfg, "policy_kwargs", {}) or {}
-            if hasattr(pk, "to_dict"):
-                pk = pk.to_dict()
-            elif not isinstance(pk, dict):
-                try:
-                    pk = dict(pk)
-                except Exception:
-                    pk = {}
-            sal_cfg = dict(pk.get("saliency", {}) or {})
+            # First try direct saliency config on BCAgentConfig
+            direct = getattr(cfg, "saliency", {}) or {}
+            if hasattr(direct, "to_dict"):
+                sal_cfg = direct.to_dict()
+            elif isinstance(direct, dict):
+                sal_cfg = dict(direct)
+            
+            # If no direct config, try legacy policy_kwargs.saliency path
             if not sal_cfg:
-                direct = getattr(cfg, "saliency", {}) or {}
-                if hasattr(direct, "to_dict"):
-                    sal_cfg = direct.to_dict()
-                elif isinstance(direct, dict):
-                    sal_cfg = dict(direct)
+                pk = getattr(cfg, "policy_kwargs", {}) or {}
+                if hasattr(pk, "to_dict"):
+                    pk = pk.to_dict()
+                elif not isinstance(pk, dict):
+                    try:
+                        pk = dict(pk)
+                    except Exception:
+                        pk = {}
+                sal_cfg = dict(pk.get("saliency", {}) or {})
         except Exception:
             sal_cfg = {}
         self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})

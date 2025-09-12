@@ -164,22 +164,39 @@ def main(_):
     if ddp_enabled and not ddp_active and torch.cuda.device_count() > 1:
         logging.warning("DDP enabled in config but process not launched with torchrun. Proceeding single-process.")
 
-    # set up wandb (only on main process)
+    # set up wandb (only on main process), allow disabling via config.wandb.enabled
     wandb_logger = None
     save_root: str | None = None
     if is_main_process():
-        wandb_config = WandBLogger.get_default_config()
-        # allow YAML to override wandb.project
         wb_cfg = getattr(cfg, "wandb", {}) or {}
+        try:
+            wb_enabled = bool(wb_cfg.get("enabled", True)) if isinstance(wb_cfg, dict) else True
+        except Exception:
+            wb_enabled = True
+
         project_name = wb_cfg.get("project", "bridgedata_torch") if isinstance(wb_cfg, dict) else "bridgedata_torch"
-        wandb_config.update({"project": project_name, "exp_descriptor": FLAGS.name})
-        wandb_logger = WandBLogger(wandb_config=wandb_config, variant=cfg.to_dict(), debug=FLAGS.debug)
+
+        unique_id = None
+        exp_descriptor = FLAGS.name
+
+        if wb_enabled:
+            wandb_config = WandBLogger.get_default_config()
+            wandb_config.update({"project": project_name, "exp_descriptor": exp_descriptor})
+            try:
+                wandb_logger = WandBLogger(wandb_config=wandb_config, variant=cfg.to_dict(), debug=FLAGS.debug)
+                unique_id = wandb_logger.config.unique_identifier
+            except Exception:
+                wandb_logger = None
 
         # Prepare dirs and config snapshot following original layout
+        if unique_id is None:
+            from datetime import datetime as _dt
+            unique_id = _dt.now().strftime("%Y%m%d_%H%M%S")
+
         save_root = os.path.join(
             cfg.save_dir,
-            wandb_logger.config.project,
-            f"{wandb_logger.config.exp_descriptor}_{wandb_logger.config.unique_identifier}",
+            project_name,
+            f"{exp_descriptor}_{unique_id}",
         )
         _ensure_dir(save_root)
         try:
@@ -188,10 +205,13 @@ def main(_):
             with open(os.path.join(save_root, "config.json"), "w") as f:
                 json.dump(snap, f)
             logging.info("Config saved to %s", save_root)
-            if wandb_logger and wandb_logger.run:
+            if wandb_logger and getattr(wandb_logger, "run", None):
                 logging.info("WandB run initialized: %s", wandb_logger.run.url)
             else:
-                logging.warning("WandB run not initialized properly")
+                if wb_enabled:
+                    logging.warning("WandB enabled but run not initialized (offline or import issue)")
+                else:
+                    logging.info("WandB disabled via config; logging to console only")
         except Exception as e:
             logging.warning("Failed to write config.json: %s", e)
 
@@ -284,19 +304,26 @@ def main(_):
         # Filter out saliency from policy kwargs (handled by agent config)
         _policy_kwargs_bc = dict(cfg.agent_kwargs.get("policy_kwargs", {}))
         _policy_kwargs_bc.pop("saliency", None)
+        # Create BCAgentConfig with saliency configuration if present
+        bc_config = BCAgentConfig(
+            network_kwargs=cfg.agent_kwargs.get("network_kwargs", {}),
+            policy_kwargs=_policy_kwargs_bc,  # Use the filtered policy_kwargs without saliency
+            use_proprio=cfg.agent_kwargs.get("use_proprio", False),
+            learning_rate=cfg.agent_kwargs.get("learning_rate", 3e-4),
+            weight_decay=cfg.agent_kwargs.get("weight_decay", 0.0),
+            warmup_steps=cfg.agent_kwargs.get("warmup_steps", 1000),
+            decay_steps=cfg.num_steps,
+        )
+        # Add saliency config to BCAgentConfig if present in original policy_kwargs
+        original_policy_kwargs = cfg.agent_kwargs.get("policy_kwargs", {})
+        if "saliency" in original_policy_kwargs:
+            bc_config.saliency = original_policy_kwargs["saliency"]
+        
         agent = BCAgent(
             model=
             __import__("bridge_torch.agents.bc", fromlist=["GaussianPolicy"])  # late import to reuse encoder
             .GaussianPolicy(enc, mlp, action_dim=action_dim, use_proprio=cfg.agent_kwargs.get("use_proprio", False), **_policy_kwargs_bc),
-            cfg=BCAgentConfig(
-                network_kwargs=cfg.agent_kwargs.get("network_kwargs", {}),
-                policy_kwargs=cfg.agent_kwargs.get("policy_kwargs", {}),
-                use_proprio=cfg.agent_kwargs.get("use_proprio", False),
-                learning_rate=cfg.agent_kwargs.get("learning_rate", 3e-4),
-                weight_decay=cfg.agent_kwargs.get("weight_decay", 0.0),
-                warmup_steps=cfg.agent_kwargs.get("warmup_steps", 1000),
-                decay_steps=cfg.num_steps,
-            ),
+            cfg=bc_config,
             action_dim=action_dim,
             device=device,
         )

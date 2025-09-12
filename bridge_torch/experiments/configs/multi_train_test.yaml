@@ -109,4 +109,5 @@ global:
 
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:
+    enabled: true
     project: "bridgedata_torch"

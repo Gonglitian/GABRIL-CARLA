@@ -37,7 +37,7 @@ ENV_PARAMS = {
     "override_workspace_boundaries": WORKSPACE_BOUNDS,
     "move_duration": STEP_DURATION,
 }
-
+ACTION_DIM = 7
 
 def _prep_device(arg: str) -> torch.device:
     if arg == "cuda" and torch.cuda.is_available():
@@ -87,19 +87,6 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: O
             cfg = json.load(f)
     # build agent/model
     agent, kind, obs_horizon, act_pred_horizon = _build_agent_from_config(cfg, device, im_size)
-    # load action/proprio metadata for normalization
-    action_proprio_metadata = cfg.get("bridgedata_config", {}).get("action_proprio_metadata")
-    action_mean = np.array(action_proprio_metadata["action"]["mean"]) if action_proprio_metadata else np.zeros(7, dtype=np.float32)
-    action_std = np.array(action_proprio_metadata["action"]["std"]) if action_proprio_metadata else np.ones(7, dtype=np.float32)
-    proprio_mean = None
-    proprio_std = None
-    try:
-        if action_proprio_metadata and ("proprio" in action_proprio_metadata):
-            proprio_mean = np.array(action_proprio_metadata["proprio"].get("mean"))
-            proprio_std = np.array(action_proprio_metadata["proprio"].get("std"))
-    except Exception:
-        print("No proprio metadata found")
-        proprio_mean, proprio_std = None, None
     # hydrate agent weights, stripping compiled prefixes like "_orig_mod."
     payload = torch.load(ckpt_path, map_location=device)
     model_to_load = agent.model.module if hasattr(agent.model, "module") else agent.model
@@ -116,13 +103,9 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: O
         "name": name,
         "agent": agent,
         "kind": kind,
-        "action_mean": action_mean,
-        "action_std": action_std,
         "obs_horizon": obs_horizon,
         "act_pred_horizon": act_pred_horizon,
         "ckpt_path": ckpt_path,
-        "proprio_mean": proprio_mean,
-        "proprio_std": proprio_std,
     }
 
 
@@ -156,12 +139,6 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     act_pred_horizon = int(ds_kwargs.get("act_pred_horizon", 1))
 
     # we will infer action_dim from bridgedata_config metadata
-    bd_meta = cfg.get("bridgedata_config", {}).get("action_proprio_metadata", {})
-    act_mean = np.array(bd_meta.get("action", {}).get("mean")) if bd_meta else None
-    if act_mean is None:
-        action_dim = 7
-    else:
-        action_dim = int(len(act_mean))
 
     # Warmup to set encoder feature dim (use im_size from args)
     dummy_image = torch.zeros(1, 3 * obs_horizon, im_size, im_size, device=device)
@@ -177,7 +154,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
         model = __import__("bridge_torch.agents.bc", fromlist=["GaussianPolicy"]).GaussianPolicy(
             enc,
             mlp,
-            action_dim=action_dim,
+            action_dim=ACTION_DIM,
             use_proprio=use_proprio,
             **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
         )
@@ -192,7 +169,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
                 warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
                 decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
             ),
-            action_dim=action_dim,
+            action_dim=ACTION_DIM,
             device=device,
         )
         get_action_kind = "bc"
@@ -205,7 +182,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
             obs_encoder=enc,
             goal_encoder=enc_goal,
             mlp=mlp,
-            action_dim=action_dim,
+            action_dim=ACTION_DIM,
             early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", True),
             use_proprio=use_proprio,
             **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
@@ -223,7 +200,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
                 warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
                 decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
             ),
-            action_dim=action_dim,
+            action_dim=ACTION_DIM,
             device=device,
         )
         get_action_kind = "gc_bc"
@@ -239,7 +216,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
             dropout_rate=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("dropout_rate", 0.1),
             hidden_dim=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("hidden_dim", 256),
             use_layer_norm=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("use_layer_norm", True),
-            action_seq_shape=(act_pred_horizon, action_dim),
+            action_seq_shape=(act_pred_horizon, ACTION_DIM),
             device=device,
             use_proprio=use_proprio,
             proprio_feature_dim=prop_dim,
@@ -267,7 +244,7 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     return agent, get_action_kind, obs_horizon, act_pred_horizon
 
 
-def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.ndarray, action_std: np.ndarray, proprio_mean: Optional[np.ndarray], proprio_std: Optional[np.ndarray]):
+def _build_get_action(agent, kind: str, deterministic: bool):
     @torch.no_grad()
     def get_action(obs: Dict[str, np.ndarray], goal_obs: Dict[str, np.ndarray]):
         # convert to torch batch
@@ -295,16 +272,8 @@ def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.nda
                 img_t = img_t.unsqueeze(0)
             batch_obs["image"] = img_t.to(device)
         if "proprio" in obs and obs["proprio"] is not None:
+            # Use raw proprio (no normalization)
             prop_np = obs["proprio"]
-            try:
-                if proprio_mean is not None and proprio_std is not None:
-                    prop_np = (prop_np - proprio_mean) / (proprio_std + 1e-8)
-            except Exception:
-                # best-effort broadcasting for (T,P)
-                try:
-                    prop_np = (prop_np - proprio_mean[None, ...]) / (proprio_std[None, ...] + 1e-8)
-                except Exception:
-                    pass
             prop = torch.from_numpy(prop_np).float().unsqueeze(0).to(device)
             batch_obs["proprio"] = prop
 
@@ -328,7 +297,7 @@ def _build_get_action(agent, kind: str, deterministic: bool, action_mean: np.nda
             act = act_seq[:, 0, :]  # 仅执行第一个时间步
 
         action = act.squeeze(0).cpu().numpy()
-        action = action * action_std + action_mean
+        # Use model output as-is (no de-normalization)
         return action
 
     return get_action
@@ -431,10 +400,6 @@ def main():
         picked["agent"],
         picked["kind"],
         args.deterministic,
-        picked["action_mean"],
-        picked["action_std"],
-        picked.get("proprio_mean"),
-        picked.get("proprio_std"),
     )
     obs_horizon = picked["obs_horizon"]
     act_pred_horizon = picked["act_pred_horizon"]
@@ -574,5 +539,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

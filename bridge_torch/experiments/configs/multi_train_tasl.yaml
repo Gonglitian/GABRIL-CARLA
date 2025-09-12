@@ -1,17 +1,17 @@
 # Torch multi-run example
 matrix:
   algos: ["bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
-  tasks: ["lift_carrot_100"]  # 可改为以下任一 data_config 任务：
-  # 可选：对 Saliency 的 weight 做笛卡尔积扫描（与 algos×tasks 以及 encoders/backbones 组合）
-  saliency_weights: [5]
-  # 可选：对数据集的 obs_horizon 做笛卡尔积扫描（与上面组合项一起展开）
-  obs_horizons: [1, 2]
+  tasks: ["lift_carrot_100", "lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100"]  # 可改为以下任一 data_config 任务：
   #   - "lift_carrot_100"
   #   - "lift_carrot_100_confounded"
   #   - "pull_pot_100"
   #   - "put_carrot_in_pot_100"
   #   - "put_in_pot_lid_100"
   #   - "remove_pot_lid_150"
+  # 可选：对 Saliency 的 weight 做笛卡尔积扫描（与 algos×tasks 以及 encoders/backbones 组合）
+  # saliency_weights: [5]
+  # 可选：对数据集的 obs_horizon 做笛卡尔积扫描（与上面组合项一起展开）
+  obs_horizons: [1]
   # 可选：为不同 run 选择 encoder（与 algos×tasks 做笛卡尔积）
   # 直接给出 encoder 名称（支持三种）：
   # encoders: ["resnetv1-50-bridge"]
@@ -35,9 +35,9 @@ global:
   
   # Training schedule
   train_batch_size: 2000
-  num_steps: 20000
-  save_interval: 10000
-  log_interval: 10
+  num_steps: 30000
+  save_interval: 15000
+  log_interval: 50
   # Eval
   val_batch_size: 20
   eval_batches: null  # Set to null to skip evaluation completely
@@ -48,7 +48,7 @@ global:
   #   - "warmup_cosine"
   scheduler:
     type: "warmup_cosine"
-  warmup_steps: 2000
+  warmup_steps: 3000
 
 
   # Optional CUDA devices (string like "0,1")

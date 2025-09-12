@@ -16,7 +16,6 @@ def _print_dict(d: Dict[str, Any], prefix: str = "", max_items: int = 3, max_dep
     
     for i, (k, v) in enumerate(items):
         key_str = f"{k:<{max_key_len}}"
-        
         if isinstance(v, dict):
             print(f"{prefix}├─ {key_str} : dict[{len(v)}]")
             if len(v) > 0 and max_depth > 0:

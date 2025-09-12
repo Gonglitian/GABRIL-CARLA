@@ -2,8 +2,8 @@
 # python bridge_torch/experiments/multi_train.py --config bridge_torch/experiments/configs/multi_train.yaml
 
 matrix:
-  algos: ["bc", "gc_bc", "gc_ddpm_bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
-  tasks: ["lift_carrot_100", "lift_carrot_100_confounded", "pull_pot_100", "put_carrot_in_pot_100", "put_in_pot_lid_100"]  # 可改为以下任一 data_config 任务：
+  algos: ["bc"]  # 可改为 ["bc", "gc_bc", "gc_ddpm_bc"]
+  tasks: ["lift_carrot_100"]  # 可改为以下任一 data_config 任务：
   #   - "lift_carrot_100"
   #   - "lift_carrot_100_confounded"
   #   - "pull_pot_100"
@@ -106,16 +106,6 @@ global:
     prefetch_factor: 4
     persistent_workers: true
     pin_memory: true
-
-  # 性能剖析（仅主进程生效），输出到 save_dir/bridgedata_torch/<run>/profiler
-  profiler:
-    enabled: false
-    wait: 1      # 等待步数（不记录）
-    warmup: 1    # 预热步数（记录但不导出）
-    active: 5    # 采集步数
-    repeat: 1
-    record_shapes: true
-    with_stack: false
 
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:

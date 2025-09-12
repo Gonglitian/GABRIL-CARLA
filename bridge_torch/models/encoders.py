@@ -130,6 +130,7 @@ def build_encoder(name: str, **kwargs) -> nn.Module:
             "resnetv1-34-bridge": "resnet34",
             "resnetv1-50-bridge": "resnet50",
         }[name]
+        kw.pop("arch", None)
         return ResNetV1Bridge(arch=arch, **kw)
 
     # placeholder for film variant (not implemented)

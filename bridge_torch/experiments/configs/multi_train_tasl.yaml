@@ -32,6 +32,7 @@ global:
   # save_dir: /data3/vla-reasoning/exp/bdv2_runs_0908
   data_root: /data3/vla-reasoning/dataset/bdv2_numpy
   save_dir: /data3/vla-reasoning/torch_runs
+  
   # Training schedule
   train_batch_size: 2000
   num_steps: 20000

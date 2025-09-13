@@ -15,8 +15,8 @@ global:
   # Paths
   # data_root: /data3/vla-reasoning/dataset/bdv2_tfrecord
   # save_dir: /data3/vla-reasoning/exp/bdv2_runs_0908
-  data_root: /data3/vla-reasoning/dataset/bdv2_numpy
-  save_dir: /data3/vla-reasoning/torch_runs
+  data_root: /data3/vla-reasoning/test_dataset/bdv2_numpy
+  save_dir: /data3/vla-reasoning/torch_runs_test
   # Training schedule
   train_batch_size: 500
   num_steps: 10
@@ -47,7 +47,7 @@ global:
 
   name_format: "{algo}_{task}"
   saliency:
-    enabled: true
+    enabled: false
     alpha: 0.7
     beta: 1.0
     weight: 1

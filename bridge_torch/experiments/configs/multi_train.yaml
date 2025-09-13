@@ -99,16 +99,6 @@ global:
     persistent_workers: true
     pin_memory: true
 
-  # 性能剖析（仅主进程生效），输出到 save_dir/bridgedata_torch/<run>/profiler
-  profiler:
-    enabled: false
-    wait: 1      # 等待步数（不记录）
-    warmup: 1    # 预热步数（记录但不导出）
-    active: 5    # 采集步数
-    repeat: 1
-    record_shapes: true
-    with_stack: false
-
   # WandB 项目设置：可在此处覆盖默认 project 名称
   wandb:
     project: "bridgedata_torch"

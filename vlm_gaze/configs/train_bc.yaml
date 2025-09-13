@@ -8,7 +8,7 @@ defaults:
 # Override data configuration for confounded dataset
 data:
   hdf5_path: "/data3/vla-reasoning/dataset/bench2drive220_robomimic.hdf5"
-  gaze_key: "gaze_coords_filter_dynamic"
+  gaze_key: "gaze_coords"
   num_episodes: 200
   batch_size: 2000
   cache_mode: "all"
@@ -16,7 +16,7 @@ data:
 # Override gaze configuration
 gaze:
   method: "Reg"
-  mask_sigma: 20.0
+  mask_sigma: 30.0
 
 # Override dropout configuration  
 dropout:
@@ -24,7 +24,7 @@ dropout:
 
 # Override training configuration
 training:
-  epochs: 200
+  epochs: 500
   use_amp: true
   use_compile: true
   device: "cuda:0"

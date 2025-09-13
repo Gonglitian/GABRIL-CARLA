@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from bridge_torch.common.gaze import get_gaze_mask
+from common.gaze import get_gaze_mask
 
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dims=(256, 256, 256), dropout_rate=0.0, activate_final=True):
@@ -79,13 +79,15 @@ class GaussianPolicy(nn.Module):
 
 @dataclass
 class BCAgentConfig:
-    network_kwargs: Dict[str, Any]
-    policy_kwargs: Dict[str, Any]
-    use_proprio: bool = False
+    # Optimizer
     learning_rate: float = 3e-4
     weight_decay: float = 0.0
+    # Scheduler
     warmup_steps: int = 1000
     decay_steps: int = 1000000
+    scheduler: Dict[str, Any] = field(default_factory=dict)
+    # Saliency regularization
+    saliency: Dict[str, Any] = field(default_factory=dict)
 
 
 class BCAgent:
@@ -113,29 +115,12 @@ class BCAgent:
         self.step = 0
 
         # Saliency-variant config (optional, from YAML)
-        # Check both cfg.saliency (direct) and policy_kwargs.saliency (legacy)
         sal_cfg = {}
-        try:
-            # First try direct saliency config on BCAgentConfig
-            direct = getattr(cfg, "saliency", {}) or {}
-            if hasattr(direct, "to_dict"):
-                sal_cfg = direct.to_dict()
-            elif isinstance(direct, dict):
-                sal_cfg = dict(direct)
-            
-            # If no direct config, try legacy policy_kwargs.saliency path
-            if not sal_cfg:
-                pk = getattr(cfg, "policy_kwargs", {}) or {}
-                if hasattr(pk, "to_dict"):
-                    pk = pk.to_dict()
-                elif not isinstance(pk, dict):
-                    try:
-                        pk = dict(pk)
-                    except Exception:
-                        pk = {}
-                sal_cfg = dict(pk.get("saliency", {}) or {})
-        except Exception:
-            sal_cfg = {}
+        direct = getattr(cfg, "saliency", {}) or {}
+        if hasattr(direct, "to_dict"):
+            sal_cfg = direct.to_dict()
+        elif isinstance(direct, dict):
+            sal_cfg = dict(direct)
         self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
         self._saliency_weight = float(sal_cfg.get("weight", 1.0))
         self._saliency_beta = float(sal_cfg.get("beta", 1.0))
@@ -178,25 +163,33 @@ class BCAgent:
 
     def update(self, batch: Dict[str, torch.Tensor]):
         self.model.train()
-        obs = {k: v.to(self.device, non_blocking=True) for k, v in batch["observations"].items() if isinstance(v, torch.Tensor)}
+        base = self.model.module if hasattr(self.model, "module") else self.model
+        # Move to device with channels_last for 4D tensors
+        obs: Dict[str, torch.Tensor] = {}
+        for k, v in batch["observations"].items():
+            if not isinstance(v, torch.Tensor):
+                continue
+            t = v.to(self.device, non_blocking=True)
+            if t.dim() == 4:  # (B,C,H,W)
+                t = t.contiguous(memory_format=torch.channels_last)
+            obs[k] = t
         actions = batch["actions"].to(self.device, non_blocking=True)
-        out = self.model(obs)
-        dist = self.model.dist(out)
+        out = base(obs)
+        dist = base.dist(out)
         log_prob = dist.log_prob(actions)
         actor_loss = -log_prob.mean()
         reg_loss = torch.tensor(0.0, device=self.device)
         # Saliency regularization (Reg variant)
         if self._saliency_enabled and ("saliency" in obs):
-            try:
-                z_map = self._last_spatial  # (B,C,Hf,Wf)
-                self._last_spatial = None  # reset for next step
-                if z_map is not None and z_map.dim() == 4:
-                    target = obs["saliency"]  # (B,1,H,W)
-                    H, W = int(target.shape[-2]), int(target.shape[-1])
-                    pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))  # (B,1,H,W)
-                    reg_loss = F.mse_loss(pred, target)
-            except Exception as e:
-                print(e)
+            z_map = self._last_spatial  # (B,C,Hf,Wf)
+            # print(f"z_map.shape: {z_map.shape}")
+            # print(f"obs['saliency'].shape: {obs['saliency'].shape}")
+            self._last_spatial = None  # reset for next step
+            if z_map is not None and z_map.dim() == 4:
+                target = obs["saliency"]  # (B,1,H,W)
+                H, W = int(target.shape[-2]), int(target.shape[-1])
+                pred = get_gaze_mask(z_map, self._saliency_beta, (H, W))  # (B,1,H,W)
+                reg_loss = F.mse_loss(pred, target)
         loss = actor_loss + self._saliency_weight * reg_loss
         with torch.no_grad():
             mse = F.mse_loss(out["mu"], actions, reduction="none").sum(-1).mean()
@@ -225,10 +218,18 @@ class BCAgent:
     @torch.no_grad()
     def get_debug_metrics(self, batch: Dict[str, torch.Tensor]):
         self.model.eval()
-        obs = {k: v.to(self.device, non_blocking=True) for k, v in batch["observations"].items() if isinstance(v, torch.Tensor)}
+        base = self.model.module if hasattr(self.model, "module") else self.model
+        obs: Dict[str, torch.Tensor] = {}
+        for k, v in batch["observations"].items():
+            if not isinstance(v, torch.Tensor):
+                continue
+            t = v.to(self.device, non_blocking=True)
+            if t.dim() == 4:
+                t = t.contiguous(memory_format=torch.channels_last)
+            obs[k] = t
         actions = batch["actions"].to(self.device, non_blocking=True)
-        out = self.model(obs)
-        dist = self.model.dist(out)
+        out = base(obs)
+        dist = base.dist(out)
         log_prob = dist.log_prob(actions)
         mse = F.mse_loss(out["mu"], actions, reduction="none").sum(-1).mean()
         return {"mse": mse.item(), "log_probs": log_prob.mean().item()}
@@ -236,8 +237,17 @@ class BCAgent:
     @torch.no_grad()
     def sample_actions(self, obs: Dict[str, torch.Tensor], argmax: bool = False):
         self.model.eval()
-        out = self.model({k: v.to(self.device, non_blocking=True) for k, v in obs.items()})
-        dist = self.model.dist(out)
+        base = self.model.module if hasattr(self.model, "module") else self.model
+        obs_dev: Dict[str, torch.Tensor] = {}
+        for k, v in obs.items():
+            if not isinstance(v, torch.Tensor):
+                continue
+            t = v.to(self.device, non_blocking=True)
+            if t.dim() == 4:
+                t = t.contiguous(memory_format=torch.channels_last)
+            obs_dev[k] = t
+        out = base(obs_dev)
+        dist = base.dist(out)
         if argmax:
             return out["mu"].cpu()
         return dist.sample().cpu()

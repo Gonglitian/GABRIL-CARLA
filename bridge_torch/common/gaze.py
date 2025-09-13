@@ -23,10 +23,6 @@ def get_gaze_mask(
     Returns:
         (B, 1, H*, W*)，范围 [0,1]
     """
-    if not isinstance(spatial_features, torch.Tensor):
-        raise TypeError("spatial_features must be a torch.Tensor")
-    if spatial_features.dim() != 4:
-        raise ValueError(f"Expected (B,C,H,W), got {tuple(spatial_features.shape)}")
 
     # 1) 通道聚合（与 vlm_gaze 相同：abs 后在通道维求和）
     z = spatial_features.abs().sum(dim=1)  # (B, H, W)

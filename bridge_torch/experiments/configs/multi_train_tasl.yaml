@@ -52,7 +52,7 @@ global:
 
 
   # Optional CUDA devices (string like "0,1")
-  cuda_visible_devices: "1,2,4,5"
+  cuda_visible_devices: "4,5,7"
 
   name_format: "{algo}_{task}"
   # 统一的 saliency 配置（global 生效）
@@ -86,7 +86,7 @@ global:
   # 分布式训练（multi_train.py 将按本配置用 torchrun 启动每个 run）
   ddp:
     enabled: true
-    nproc_per_node: 4
+    nproc_per_node: 3
 
   # 性能优化配置
   # AMP (Automatic Mixed Precision) - 混合精度训练

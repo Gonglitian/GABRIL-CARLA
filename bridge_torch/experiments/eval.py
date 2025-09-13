@@ -17,10 +17,8 @@ import imageio
 
 from .widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
 
-from bridge_torch.models.encoders import build_encoder
-from bridge_torch.agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC
-from bridge_torch.agents.gc_bc import GCBCAgent, GCBCConfig, MLP as MLP_GC
-from bridge_torch.agents.gc_ddpm_bc import GCDDPMBCAgent, GCDDPMConfig, build_ddpm_policy
+from models.encoders import build_encoder
+from agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC, GaussianPolicy
 
 from .utils import state_to_eep, stack_obs
 
@@ -130,13 +128,13 @@ def _discover_runs(root_dir: str) -> list:
 
 
 def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
-    algo = cfg["agent"]
+    algo = "bc"
     enc = build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
 
     # dummy shapes from dataset config
-    ds_kwargs = cfg.get("dataset_kwargs", {})
-    obs_horizon = int(ds_kwargs.get("obs_horizon", 1))
-    act_pred_horizon = int(ds_kwargs.get("act_pred_horizon", 1))
+    data_kwargs = cfg.get("data", {})
+    obs_horizon = int(data_kwargs.get("obs_horizon", 1))
+    act_pred_horizon = int(data_kwargs.get("act_pred_horizon", 1))
 
     # we will infer action_dim from bridgedata_config metadata
 
@@ -144,102 +142,40 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     dummy_image = torch.zeros(1, 3 * obs_horizon, im_size, im_size, device=device)
     _ = enc(dummy_image)
     enc_feat = int(getattr(enc, "_feat_dim"))
-    use_proprio = bool(cfg.get("agent_kwargs", {}).get("use_proprio", False))
+    # Use new schema under model
+    use_proprio = bool(cfg.get("model", {}).get("use_proprio", False))
     prop_dim = 0
     if use_proprio:
         prop_dim = 7  # conservative default; not heavily used at eval time
 
-    if algo == "bc":
-        mlp = MLP_BC(input_dim=enc_feat + prop_dim)
-        model = __import__("bridge_torch.agents.bc", fromlist=["GaussianPolicy"]).GaussianPolicy(
-            enc,
-            mlp,
-            action_dim=ACTION_DIM,
-            use_proprio=use_proprio,
-            **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
-        )
-        agent = BCAgent(
-            model=model,
-            cfg=BCAgentConfig(
-                network_kwargs=cfg.get("agent_kwargs", {}).get("network_kwargs", {}),
-                policy_kwargs=cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
-                use_proprio=use_proprio,
-                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
-                weight_decay=cfg.get("agent_kwargs", {}).get("weight_decay", 0.0),
-                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
-                decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
-            ),
-            action_dim=ACTION_DIM,
-            device=device,
-        )
-        get_action_kind = "bc"
-    elif algo == "gc_bc":
-        enc_goal = None if cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True) else build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
-        if enc_goal is None:
-            _ = enc(dummy_image)
-        mlp = MLP_GC(input_dim=(enc_feat + (enc_feat if enc_goal is None else int(getattr(enc_goal, "_feat_dim"))) + prop_dim), **cfg.get("agent_kwargs", {}).get("network_kwargs", {}))
-        model = __import__("bridge_torch.agents.gc_bc", fromlist=["GCBCPolicy"]).GCBCPolicy(
-            obs_encoder=enc,
-            goal_encoder=enc_goal,
-            mlp=mlp,
-            action_dim=ACTION_DIM,
-            early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", True),
-            use_proprio=use_proprio,
-            **cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
-        )
-        agent = GCBCAgent(
-            model=model,
-            cfg=GCBCConfig(
-                network_kwargs=cfg.get("agent_kwargs", {}).get("network_kwargs", {}),
-                policy_kwargs=cfg.get("agent_kwargs", {}).get("policy_kwargs", {}),
-                early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", True),
-                shared_goal_encoder=cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True),
-                use_proprio=use_proprio,
-                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
-                weight_decay=cfg.get("agent_kwargs", {}).get("weight_decay", 0.0),
-                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 1000),
-                decay_steps=cfg.get("agent_kwargs", {}).get("decay_steps", 1000000),
-            ),
-            action_dim=ACTION_DIM,
-            device=device,
-        )
-        get_action_kind = "gc_bc"
-    elif algo == "gc_ddpm_bc":
-        enc_goal = None if cfg.get("agent_kwargs", {}).get("shared_goal_encoder", True) else build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
-        # Build DDPM policy
-        policy = build_ddpm_policy(
-            obs_encoder=enc,
-            goal_encoder=enc_goal,
-            early_goal_concat=cfg.get("agent_kwargs", {}).get("early_goal_concat", False),
-            time_dim=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("time_dim", 32),
-            num_blocks=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("num_blocks", 3),
-            dropout_rate=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("dropout_rate", 0.1),
-            hidden_dim=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("hidden_dim", 256),
-            use_layer_norm=cfg.get("agent_kwargs", {}).get("score_network_kwargs", {}).get("use_layer_norm", True),
-            action_seq_shape=(act_pred_horizon, ACTION_DIM),
-            device=device,
-            use_proprio=use_proprio,
-            proprio_feature_dim=prop_dim,
-        )
-        agent = GCDDPMBCAgent(
-            policy=policy,
-            cfg=GCDDPMConfig(
-                learning_rate=cfg.get("agent_kwargs", {}).get("learning_rate", 3e-4),
-                warmup_steps=cfg.get("agent_kwargs", {}).get("warmup_steps", 2000),
-                actor_decay_steps=cfg.get("agent_kwargs", {}).get("actor_decay_steps", None),
-                beta_schedule=cfg.get("agent_kwargs", {}).get("beta_schedule", "cosine"),
-                diffusion_steps=cfg.get("agent_kwargs", {}).get("diffusion_steps", 20),
-                action_samples=cfg.get("agent_kwargs", {}).get("action_samples", 1),
-                repeat_last_step=cfg.get("agent_kwargs", {}).get("repeat_last_step", 0),
-                target_update_rate=cfg.get("agent_kwargs", {}).get("target_update_rate", 0.002),
-                action_min=-2.0,
-                action_max=2.0,
-            ),
-            device=device,
-        )
-        get_action_kind = "gc_ddpm_bc"
-    else:
-        raise ValueError(f"Unsupported torch agent: {algo}")
+    # Only BC supported in refactor
+    mlp = MLP_BC(input_dim=enc_feat + prop_dim, hidden_dims=tuple(cfg.get("model", {}).get("hidden_dims", [256,256,256])), dropout_rate=float(cfg.get("model", {}).get("dropout_rate", 0.0)))
+    policy_kwargs = {
+        "tanh_squash_distribution": bool(cfg.get("model", {}).get("tanh_squash_distribution", False)),
+        "state_dependent_std": bool(cfg.get("model", {}).get("state_dependent_std", False)),
+        "fixed_std": list(cfg.get("model", {}).get("fixed_std", [])) or None,
+        "use_proprio": use_proprio,
+    }
+    model = GaussianPolicy(
+        enc,
+        mlp,
+        action_dim=ACTION_DIM,
+        **policy_kwargs,
+    )
+    agent = BCAgent(
+        model=model,
+        cfg=BCAgentConfig(
+            learning_rate=float(cfg.get("optimizer", {}).get("lr", 3e-4)),
+            weight_decay=float(cfg.get("optimizer", {}).get("weight_decay", 0.0)),
+            warmup_steps=int(cfg.get("scheduler", {}).get("warmup_steps", 1000)),
+            decay_steps=int(cfg.get("scheduler", {}).get("decay_steps", 1000000)),
+            scheduler=cfg.get("scheduler", {}),
+            saliency=cfg.get("saliency", {}),
+        ),
+        action_dim=ACTION_DIM,
+        device=device,
+    )
+    get_action_kind = "bc"
 
     return agent, get_action_kind, obs_horizon, act_pred_horizon
 

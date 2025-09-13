@@ -1,0 +1,50 @@
+# Algo: Behavior Cloning (BC)
+
+# Model/Policy
+model:
+  hidden_dims: [256, 256, 256]
+  dropout_rate: 0.1
+  tanh_squash_distribution: false
+  state_dependent_std: false
+  fixed_std: [1, 1, 1, 1, 1, 1, 1]
+  use_proprio: true
+
+# Optimizer
+optimizer:
+  lr: 0.0003
+  weight_decay: 0.0
+
+# Scheduler (decay_steps defaulted to ${num_steps} in root)
+scheduler:
+  type: warmup_cosine
+  warmup_steps: 2000
+
+# Data settings (torch Dataset)
+data:
+  goal_relabeling_strategy: uniform
+  goal_relabeling_kwargs:
+    reached_proportion: 0.0
+  relabel_actions: true
+  augment: true
+  obs_horizon: 1
+  act_pred_horizon: 1
+  saliency_alpha: ${saliency.alpha}
+  shuffle_buffer_size: 25000
+  augment_next_obs_goal_differently: false
+  augment_kwargs:
+    random_resized_crop:
+      scale: [0.8, 1.0]
+      ratio: [0.9, 1.1]
+    random_brightness: [0.2]
+    random_contrast: [0.8, 1.2]
+    random_saturation: [0.8, 1.2]
+    random_hue: [0.1]
+    augment_order: [random_brightness, random_contrast, random_saturation, random_hue]
+
+# Encoder
+encoder: resnetv1-34-bridge
+encoder_kwargs:
+  pooling_method: avg
+  add_spatial_coordinates: true
+  act: swish
+  arch: resnet34

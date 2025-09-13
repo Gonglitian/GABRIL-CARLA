@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from typing import Any, Dict, List
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 # Allow running both as a module (python -m bridge_torch.data.dataset_inspect)
 # and as a standalone script (python bridge_torch/data/dataset_inspect.py)
-try:
-    from .bridge_numpy import BridgeNumpyDataset  # type: ignore
-except Exception:
-    import sys as _sys, os as _os
-    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
-    from bridge_numpy import BridgeNumpyDataset  # type: ignore
+from bridge_numpy import BridgeDataset  # type: ignore
 
 
 def _coerce_paths(paths: List[str]) -> List[str]:
@@ -31,17 +26,6 @@ def _coerce_paths(paths: List[str]) -> List[str]:
     if not out:
         raise FileNotFoundError("No valid .npy paths found from --paths arguments")
     return out
-
-
-def _load_action_proprio_meta(json_path: str | None) -> Dict[str, Any] | None:
-    if not json_path:
-        return None
-    p = os.path.expanduser(json_path)
-    with open(p, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    # Expected structure:
-    # {"action": {"mean": [...], "std": [...]}, "proprio": {"mean": [...], "std": [...]}}
-    return meta
 
 
 def summarize_batch(batch: Dict[str, Any]) -> None:
@@ -88,7 +72,7 @@ def summarize_batch(batch: Dict[str, Any]) -> None:
 
 def main():
     p = argparse.ArgumentParser(
-        description="Initialize BridgeNumpyDataset and fetch a single batch for inspection",
+        description="Build BridgeDataset and fetch a single batch for inspection",
     )
     p.add_argument("--paths", nargs="+", default=["/data3/vla-reasoning/test_dataset/bdv2_numpy/lift_carrot_100/train"],
                    help="One or more directories containing out.npy or direct out.npy paths")
@@ -100,36 +84,38 @@ def main():
     p.add_argument("--augment", action="store_true")
     p.add_argument("--augment_next_obs_goal_differently", action="store_true")
     p.add_argument("--saliency_alpha", type=float, default=1.0)
-    p.add_argument("--action_proprio_meta", type=str, default="/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/bridge_torch/data/amp.json",
-                   help="Optional JSON with action/proprio mean/std (proprio-only normalization used)")
+    p.add_argument("--num_workers", type=int, default=0)
+    p.add_argument("--pin_memory", type=int, default=1)
 
     args = p.parse_args()
 
     npy_paths = _coerce_paths(args.paths)
-    apm = _load_action_proprio_meta(args.action_proprio_meta)
 
-    ds = BridgeNumpyDataset(
+    ds = BridgeDataset(
         data_paths=npy_paths,
         seed=args.seed,
-        batch_size=args.batch_size,
         train=bool(args.train),
         goal_relabeling_strategy="uniform",
         goal_relabeling_kwargs=None,
         relabel_actions=True,
-        shuffle_buffer_size=25000,
         augment=bool(args.augment),
         augment_next_obs_goal_differently=bool(args.augment_next_obs_goal_differently),
         act_pred_horizon=int(args.act_pred_horizon),
         obs_horizon=int(args.obs_horizon),
         augment_kwargs=None,
-        load_language=False,
-        load_gaze=False,
-        action_proprio_metadata=apm,
-        sample_weights=None,
         saliency_alpha=float(args.saliency_alpha),
     )
 
-    it = ds.iterator()
+    dl = DataLoader(
+        ds,
+        batch_size=int(args.batch_size),
+        shuffle=True,
+        num_workers=int(args.num_workers),
+        pin_memory=bool(args.pin_memory),
+        drop_last=False,
+    )
+
+    it = iter(dl)
     batch = next(it)
     summarize_batch(batch)
 

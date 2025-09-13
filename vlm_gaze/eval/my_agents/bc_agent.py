@@ -215,7 +215,7 @@ class BCAgent(AutonomousAgent):
         if not self.debug_enabled or step >= 5:
             return
         if success:
-            print(f"Applied confounded overlay using prev_control")
+            print(f"Applied confounded overlay for both model input and video recording")
         else:
             print(f"Overlay failed: {error}")
     
@@ -224,39 +224,17 @@ class BCAgent(AutonomousAgent):
         if not self.debug_enabled or step >= 5:
             return
         print(f"Encoder output shape: {z_shape}")
-        
-    def run_step(self, input_data, timestamp):
-        """
-        Execute one step of navigation.
-        """
-
-        # Convert CARLA BGRA -> RGB and drop alpha
-        image_center_rgb = input_data['Center'][1][:, :, -2::-1]
-
-        # Important: never contaminate model inputs with overlays.
-        # Build a separate frame for recording/visualization only.
-        frame_for_video = image_center_rgb.copy()
-        if self.confounded and self.prev_control is not None:
-            try:
-                frame_for_video = self._draw_action_overlay(frame_for_video, self.prev_control)
-                self._debug_print_overlay_info(self.steps, success=True)
-            except Exception as e:
-                self._debug_print_overlay_info(self.steps, success=False, error=e)
-                # Proceed with clean inputs even if overlay fails
-                pass
-        # Record the (possibly overlayed) frame for exported video
-        self.frames_to_record.append(frame_for_video)
-        self.agent_engaged = True
-
-        # Use the clean RGB frame for model inputs
-        obs = image_center_rgb.copy()
+    
+    def _process_observation(self, image_rgb):
+        """Process RGB image into model input format."""
+        obs = image_rgb.copy()
         if self.obs_res_c == 1:
-            # 观测为 RGB，需使用 RGB->GRAY，避免与训练不一致
             obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
 
         if self.obs_res_w != self.render_res_w or self.obs_res_h != self.render_res_h:
             obs = cv2.resize(obs, (self.obs_res_w, self.obs_res_h))
         
+        # Update frame stack
         if len(self.frames_stack) == 0:
             for _ in range(self.stack):
                 self.frames_stack.append(obs.copy())
@@ -264,53 +242,57 @@ class BCAgent(AutonomousAgent):
             self.frames_stack.append(obs)
             self.frames_stack.pop(0)
         
-        stacked_obs_np = np.stack(self.frames_stack, axis=0)
-        stacked_obs_torch = torch.from_numpy(stacked_obs_np.copy()).permute(0, 3, 1, 2)
+        # Convert to tensor format matching training: [B, S, H, W, C] then to [B, S*C, H, W]
+        stacked_obs_np = np.stack(self.frames_stack, axis=0)  # [S, H, W, C]
         
-        if self.grayscale:
-            # 使用训练阶段一致的加权灰度（RGB 顺序）
-            if stacked_obs_torch.shape[1] == 3:
-                r = stacked_obs_torch[:, 0:1].float()
-                gch = stacked_obs_torch[:, 1:2].float()
-                b = stacked_obs_torch[:, 2:3].float()
-                stacked_obs_torch = 0.299 * r + 0.587 * gch + 0.114 * b
-            else:
-                stacked_obs_torch = stacked_obs_torch.float()  # 已经是单通道
+        # Add batch dimension to match training format
+        stacked_obs_np = stacked_obs_np[np.newaxis, ...]  # [1, S, H, W, C]
+        stacked_obs_torch = torch.from_numpy(stacked_obs_np.copy())
         
-        stacked_obs_torch = (stacked_obs_torch.float() / 255.0).to(self.device)
-        final_model_input = stacked_obs_torch.reshape(-1, stacked_obs_torch.shape[-2], stacked_obs_torch.shape[-1])
-        final_model_input = final_model_input.unsqueeze(0)
+        # Apply same processing as training (_format_obs_image)
+        if stacked_obs_torch.dtype == torch.uint8:
+            stacked_obs_torch = stacked_obs_torch.float() / 255.0
         
+        # [B, S, H, W, C] -> [B, S, C, H, W]
+        stacked_obs_torch = stacked_obs_torch.permute(0, 1, 4, 2, 3)
+        
+        if self.grayscale and stacked_obs_torch.shape[2] == 3:
+            # Apply RGB to grayscale conversion: 0.299*R + 0.587*G + 0.114*B
+            stacked_obs_torch = (0.299 * stacked_obs_torch[:, :, 0:1] + 
+                               0.587 * stacked_obs_torch[:, :, 1:2] + 
+                               0.114 * stacked_obs_torch[:, :, 2:3])
+        
+        # [B, S, C, H, W] -> [B, S*C, H, W] (concatenate stack frames along channel dimension)
+        B, S, C, H, W = stacked_obs_torch.shape
+        final_model_input = stacked_obs_torch.reshape(B, S*C, H, W).to(self.device)
+        
+        return final_model_input
+    
+    def _predict_control(self, model_input):
+        """Predict control from processed model input."""
         with torch.no_grad():        
             g = None
-            if self.gaze_method in ['ViSaRL', 'Mask', 'AGIL'] or self.dp_method in ['GMD', 'IGMD']: # models that need gaze prediction
-                g = self.gaze_predictor(final_model_input)
+            if self.gaze_method in ['ViSaRL', 'Mask', 'AGIL'] or self.dp_method in ['GMD', 'IGMD']:
+                g = self.gaze_predictor(model_input)
                 g[g < 0] = 0
                 g[g > 1] = 1
             
-            encoder_input = final_model_input
+            encoder_input = model_input
             if self.gaze_method == 'ViSaRL':
-                encoder_input = torch.cat([final_model_input, g], dim=1)
+                encoder_input = torch.cat([model_input, g], dim=1)
             elif self.gaze_method == 'Mask':
-                encoder_input = final_model_input * g
+                encoder_input = model_input * g
             else:
-                encoder_input = final_model_input
+                encoder_input = model_input
             
             dropout_mask = None
             if self.dp_method == 'IGMD':
                 dropout_mask = g[:,-1:]
 
-            if self.raw_files != '':
-                self.encoder_input_list.append(encoder_input.cpu().numpy())
             z = self.encoder(encoder_input, dropout_mask=dropout_mask)
-            
-            self._debug_print_encoder_info(self.steps, z.shape)
-
-            if self.raw_files != '':
-                self.z_list.append(z.cpu().numpy())
 
             if self.gaze_method == 'AGIL':
-                z = (z + self.encoder_agil(final_model_input * g)) / 2
+                z = (z + self.encoder_agil(model_input * g)) / 2
             
             if self.dp_method == 'GMD':
                 z = apply_gmd_dropout(z, g[:,-1:], test_mode=True)
@@ -320,30 +302,112 @@ class BCAgent(AutonomousAgent):
             
         v = action.cpu()[0].numpy()
         control = vector_to_control(v)
+        return control
+        
+    def run_step(self, input_data, timestamp):
+        """
+        Execute one step of navigation.
+        
+        When confounded mode is enabled, predicts action with clean image first,
+        then applies action overlay based on the prediction to create the final input.
+        This matches the training procedure where overlay is based on current action.
+        """
+
+        # Convert CARLA BGRA -> RGB and drop alpha
+        image_center_rgb = input_data['Center'][1][:, :, -2::-1]
+
+        # For confounded mode, we need to predict action first, then apply overlay
+        # This matches the training procedure where overlay is based on current action
+        if self.confounded:
+            # First pass: predict action with clean image
+            clean_obs = self._process_observation(image_center_rgb.copy())
+            predicted_control = self._predict_control(clean_obs)
+            
+            # Apply overlay based on predicted action
+            try:
+                obs_with_overlay = self._draw_action_overlay(image_center_rgb.copy(), predicted_control)
+                self._debug_print_overlay_info(self.steps, success=True)
+                overlay_applied = True
+            except Exception as e:
+                print(f"WARNING: Overlay failed at step {self.steps}: {e}")
+                self._debug_print_overlay_info(self.steps, success=False, error=e)
+                obs_with_overlay = image_center_rgb.copy()
+                overlay_applied = False
+        else:
+            obs_with_overlay = image_center_rgb.copy()
+            overlay_applied = False
+        
+        # Record the frame for exported video (with overlay if applied)
+        self.frames_to_record.append(obs_with_overlay.copy())
+        self.agent_engaged = True
+
+        # Process observation and get final control
+        if self.confounded:
+            # For confounded mode, use the pre-predicted control (overlay was already applied)
+            final_model_input = self._process_observation(obs_with_overlay)
+            control = self._predict_control(final_model_input)
+        else:
+            # For non-confounded mode, use standard processing
+            final_model_input = self._process_observation(obs_with_overlay)
+            control = self._predict_control(final_model_input)
+        
+        # For debugging and raw file saving
+        stacked_obs_np = np.stack(self.frames_stack, axis=0)
+        stacked_obs_torch = torch.from_numpy(stacked_obs_np.copy()).permute(0, 3, 1, 2)
+        if self.grayscale and stacked_obs_torch.shape[1] == 3:
+            r = stacked_obs_torch[:, 0:1].float()
+            gch = stacked_obs_torch[:, 1:2].float()
+            b = stacked_obs_torch[:, 2:3].float()
+            stacked_obs_torch = 0.299 * r + 0.587 * gch + 0.114 * b
+        else:
+            stacked_obs_torch = stacked_obs_torch.float()
+        
+        # Save raw data if needed
+        if self.raw_files != '':
+            # Re-compute encoder input for saving
+            with torch.no_grad():
+                g = None
+                if self.gaze_method in ['ViSaRL', 'Mask', 'AGIL'] or self.dp_method in ['GMD', 'IGMD']:
+                    g = self.gaze_predictor(final_model_input)
+                    g[g < 0] = 0
+                    g[g > 1] = 1
+                
+                encoder_input = final_model_input
+                if self.gaze_method == 'ViSaRL':
+                    encoder_input = torch.cat([final_model_input, g], dim=1)
+                elif self.gaze_method == 'Mask':
+                    encoder_input = final_model_input * g
+                
+                self.encoder_input_list.append(encoder_input.cpu().numpy())
+                z = self.encoder(encoder_input)
+                self.z_list.append(z.cpu().numpy())
+        
+        v = control_to_vector(control) if hasattr(control, 'throttle') else np.zeros(7)
         
         # 统一调试打印
         self._debug_print_step_info(
             step=self.steps,
             input_data=input_data,
             image_center=image_center_rgb,
-            obs=obs,
+            obs=obs_with_overlay,
             stacked_obs_np=stacked_obs_np,
             stacked_obs_torch=stacked_obs_torch,
             final_model_input=final_model_input,
-            gaze_heatmap=g,
+            gaze_heatmap=None,  # Will be computed in debug function if needed
             action_vector=v,
             control=control
         )
 
-        # 更新上一时刻 control（供下一帧 overlay 使用）
-        if self.confounded:
-            self.prev_control = control
+        # Note: In confounded mode, overlay is based on current prediction, not previous control
 
         # 前期冷启动：前 10 帧输出空控制，避免早期不稳定
         if self.steps < 10:
             return noop_control()
         # Stop extremely long episodes to avoid hangs
         elif self.steps > self.fps * 100:
+            print(f"TIMEOUT: BCAgent exceeded {self.fps * 100} steps (current: {self.steps})")
+            print(f"Confounded mode: {self.confounded}")
+            print(f"Game time: {self.steps / self.fps:.1f}s")
             raise Exception("BCAgent failed to finish the route")
 
         return control

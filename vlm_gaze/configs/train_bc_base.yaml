@@ -10,7 +10,7 @@ data:
   num_episodes: 200 # Number of episodes to use for training
   batch_size: 4000
   num_workers: 8
-  prefetch_factor: 4
+  prefetch_factor: 2
   frame_stack: 2  # Number of frames to stack
   cache_mode: "low_dim"  # HDF5 cache mode: "all", "low_dim", or null
   cache_getitem: false   # When cache_mode=="all", avoid get_item caching to save memory

@@ -36,3 +36,5 @@ _generated/
 bdv2_inspect/
 backup/
 CLAUDE.md
+
+.hydra/

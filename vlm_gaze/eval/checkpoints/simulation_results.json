@@ -9,7 +9,9 @@
     },
     "entry_status": "Started",
     "eligible": false,
-    "sensors": [],
+    "sensors": [
+        "carla_camera"
+    ],
     "values": [],
     "labels": []
 }

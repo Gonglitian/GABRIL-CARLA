@@ -1,11 +1,15 @@
 # run torch version eval
-python -m bridge_torch.experiments.eval \
-  --save_dir /scr/litian/torch_runs/bridgedata_torch/gc_bc_lift_carrot_100_20250909_083848 \
-  --goal_type gc \
-  --im_size 256 \
-  --video_save_path /scr/litian/torch_runs/videos \
-  --ip localhost --port 5556 \
-  --num_timesteps 120 --act_exec_horizon 1 --deterministic --show_image
+python eval.py \
+    --runs_root /data3/vla-reasoning/torch_runs/bridgedata_torch \
+    --goal_type bc \
+    --im_size 256 \
+    --video_save_path /data3/vla-reasoning/torch_runs/videos \
+    --ip localhost \
+    --port 5556 \
+    --num_timesteps 120 \
+    --act_exec_horizon 1 \
+    --deterministic \
+    --show_image
 
 # run numpy data convert 
 python bridge_torch/data/bdv2_to_numpy.py \

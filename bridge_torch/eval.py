@@ -15,12 +15,12 @@ import cv2
 from PIL import Image
 import imageio
 
-from .widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
 
 from models.encoders import build_encoder
 from agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC, GaussianPolicy
 
-from .utils import state_to_eep, stack_obs
+from experiments.widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
+from experiments.utils import state_to_eep, stack_obs
 
 
 STEP_DURATION = 0.2
@@ -129,10 +129,18 @@ def _discover_runs(root_dir: str) -> list:
 
 def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     algo = "bc"
-    enc = build_encoder(cfg["encoder"], **cfg.get("encoder_kwargs", {})).to(device)
+    # Robust encoder resolution with sensible defaults
+    enc_name = cfg.get("encoder", "resnetv1-34-bridge")
+    enc_kwargs = dict(cfg.get("encoder_kwargs", {})) if isinstance(cfg.get("encoder_kwargs", {}), dict) else {}
+    if "arch" not in enc_kwargs:
+        enc_kwargs.setdefault("pooling_method", "avg")
+        enc_kwargs.setdefault("add_spatial_coordinates", True)
+        enc_kwargs.setdefault("act", "swish")
+        enc_kwargs["arch"] = "resnet34"
+    enc = build_encoder(enc_name, **enc_kwargs).to(device)
 
     # dummy shapes from dataset config
-    data_kwargs = cfg.get("data", {})
+    data_kwargs = cfg.get("data", {}) if isinstance(cfg.get("data", {}), dict) else {}
     obs_horizon = int(data_kwargs.get("obs_horizon", 1))
     act_pred_horizon = int(data_kwargs.get("act_pred_horizon", 1))
 
@@ -143,17 +151,22 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
     _ = enc(dummy_image)
     enc_feat = int(getattr(enc, "_feat_dim"))
     # Use new schema under model
-    use_proprio = bool(cfg.get("model", {}).get("use_proprio", False))
+    model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model", {}), dict) else {}
+    use_proprio = bool(model_cfg.get("use_proprio", False))
     prop_dim = 0
     if use_proprio:
         prop_dim = 7  # conservative default; not heavily used at eval time
 
     # Only BC supported in refactor
-    mlp = MLP_BC(input_dim=enc_feat + prop_dim, hidden_dims=tuple(cfg.get("model", {}).get("hidden_dims", [256,256,256])), dropout_rate=float(cfg.get("model", {}).get("dropout_rate", 0.0)))
+    mlp = MLP_BC(
+        input_dim=enc_feat + prop_dim,
+        hidden_dims=tuple(model_cfg.get("hidden_dims", [256, 256, 256])),
+        dropout_rate=float(model_cfg.get("dropout_rate", 0.0)),
+    )
     policy_kwargs = {
-        "tanh_squash_distribution": bool(cfg.get("model", {}).get("tanh_squash_distribution", False)),
-        "state_dependent_std": bool(cfg.get("model", {}).get("state_dependent_std", False)),
-        "fixed_std": list(cfg.get("model", {}).get("fixed_std", [])) or None,
+        "tanh_squash_distribution": bool(model_cfg.get("tanh_squash_distribution", False)),
+        "state_dependent_std": bool(model_cfg.get("state_dependent_std", False)),
+        "fixed_std": list(model_cfg.get("fixed_std", [])) or None,
         "use_proprio": use_proprio,
     }
     model = GaussianPolicy(
@@ -162,15 +175,20 @@ def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
         action_dim=ACTION_DIM,
         **policy_kwargs,
     )
+    # Optimizer/scheduler/saliency with defaults if missing
+    opt_cfg = cfg.get("optimizer", {}) if isinstance(cfg.get("optimizer", {}), dict) else {}
+    sch_cfg = cfg.get("scheduler", {}) if isinstance(cfg.get("scheduler", {}), dict) else {}
+    sal_cfg = cfg.get("saliency", {}) if isinstance(cfg.get("saliency", {}), dict) else {}
+
     agent = BCAgent(
         model=model,
         cfg=BCAgentConfig(
-            learning_rate=float(cfg.get("optimizer", {}).get("lr", 3e-4)),
-            weight_decay=float(cfg.get("optimizer", {}).get("weight_decay", 0.0)),
-            warmup_steps=int(cfg.get("scheduler", {}).get("warmup_steps", 1000)),
-            decay_steps=int(cfg.get("scheduler", {}).get("decay_steps", 1000000)),
-            scheduler=cfg.get("scheduler", {}),
-            saliency=cfg.get("saliency", {}),
+            learning_rate=float(opt_cfg.get("lr", 3e-4)),
+            weight_decay=float(opt_cfg.get("weight_decay", 0.0)),
+            warmup_steps=int(sch_cfg.get("warmup_steps", 1000)),
+            decay_steps=int(sch_cfg.get("decay_steps", 1000000)),
+            scheduler=sch_cfg,
+            saliency=sal_cfg,
         ),
         action_dim=ACTION_DIM,
         device=device,

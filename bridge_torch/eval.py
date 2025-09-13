@@ -37,6 +37,13 @@ ENV_PARAMS = {
 }
 ACTION_DIM = 7
 
+def _stdin_has_data() -> bool:
+    try:
+        import select
+        return select.select([sys.stdin], [], [], 0)[0] != []
+    except Exception:
+        return False
+
 def _prep_device(arg: str) -> torch.device:
     if arg == "cuda" and torch.cuda.is_available():
         return torch.device("cuda")
@@ -239,7 +246,7 @@ def _build_get_action(agent, kind: str, deterministic: bool):
                     gimg = gimg.unsqueeze(0)
                 batch_goal["image"] = gimg.to(device)
             if "language" in goal_obs and goal_obs["language"] is not None:
-                # torch 版本未实现 language encoder，这里直接传占位（不支持 LC）
+                # LC not supported
                 batch_goal["language"] = torch.from_numpy(goal_obs["language"]).float().unsqueeze(0).to(device)
 
         if kind == "bc":
@@ -299,196 +306,229 @@ def main():
 
     device = _prep_device(args.device)
 
-    # build run dir list: from --save_dir and/or --runs_root
-    run_dirs = []
-    if args.save_dir:
-        run_dirs.extend(list(args.save_dir))
-    if args.runs_root:
-        discovered = _discover_runs(args.runs_root)
-        if not discovered:
-            print(f"[WARN] No valid runs discovered under {args.runs_root}")
-        run_dirs.extend(discovered)
-    if not run_dirs:
-        raise RuntimeError("Please provide --runs_root or --save_dir")
-
-    # First list candidates, then load only the selected policy to avoid heavy init
-    names = [os.path.basename(p.rstrip("/")) for p in run_dirs]
-    if len(names) == 1:
-        selected = 0
-    else:
-        if args.policy_index is not None:
-            selected = int(args.policy_index)
-            if selected < 0 or selected >= len(names):
-                raise ValueError(f"policy_index out of range: got {selected}, available [0..{len(names)-1}]")
-        else:
-            print("policies:")
-            for i, n in enumerate(names):
-                print(f"{i}) {n}")
-            selected = int(input("select policy: "))
-
-    # After selecting run, optionally select ckpt from that run
-    chosen_run = run_dirs[selected]
-    ckpt_files = _list_ckpts(chosen_run)
-    if not ckpt_files:
-        raise FileNotFoundError(f"No checkpoints in {chosen_run}")
-    if len(ckpt_files) == 1:
-        chosen_ckpt = ckpt_files[0]
-    else:
-        # show list and let user pick
-        print("checkpoints:")
-        for i, p in enumerate(ckpt_files):
-            print(f"{i}) {os.path.basename(p)}")
-        try:
-            ckpt_idx = int(input("select ckpt (default latest): ") or str(len(ckpt_files) - 1))
-        except Exception:
-            ckpt_idx = len(ckpt_files) - 1
-        if ckpt_idx < 0 or ckpt_idx >= len(ckpt_files):
-            ckpt_idx = len(ckpt_files) - 1
-        chosen_ckpt = ckpt_files[ckpt_idx]
-
-    # Load the selected policy with the chosen ckpt
-    picked = _load_policy(chosen_run, device, args.im_size, ckpt_path=chosen_ckpt)
-
-    # build get_action wrapper for picked policy
-    get_action = _build_get_action(
-        picked["agent"],
-        picked["kind"],
-        args.deterministic,
-    )
-    obs_horizon = picked["obs_horizon"]
-    act_pred_horizon = picked["act_pred_horizon"]
-
-    # set up environment
+    # set up environment (once)
     env_params = WidowXConfigs.DefaultEnvParams.copy()
     env_params.update(ENV_PARAMS)
     env_params["state_state"] = list(np.concatenate([args.initial_eep, [0, 0, 0, 1]]))
     widowx_client = WidowXClient(host=args.ip, port=args.port)
     widowx_client.init(env_params, image_size=args.im_size)
 
-    # optional preview before requesting goal, for monitoring camera stream
-    if args.show_image:
-        obs = widowx_client.get_observation()
-        while obs is None:
-            print("Waiting for observations...")
-            obs = widowx_client.get_observation()
-            time.sleep(1)
-        bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
-        cv2.imshow("img_view", bgr_img)
-        cv2.waitKey(100)
+    # Outer workflow loop to support runtime reset with 'R'
+    while True:
+        # build run dir list: from --save_dir and/or --runs_root
+        run_dirs = []
+        if args.save_dir:
+            run_dirs.extend(list(args.save_dir))
+        if args.runs_root:
+            discovered = _discover_runs(args.runs_root)
+            if not discovered:
+                print(f"[WARN] No valid runs discovered under {args.runs_root}")
+            run_dirs.extend(discovered)
+        if not run_dirs:
+            raise RuntimeError("Please provide --runs_root or --save_dir")
 
-    # load goals
-    if args.goal_type == "gc":
-        image_goal = None
-        if args.goal_image_path is not None:
-            image_goal = np.array(Image.open(args.goal_image_path))
-    else:  # bc
-        image_goal = None
-
-    # reset env
-    widowx_client.reset()
-    time.sleep(2.5)
-
-    # move to initial position
-    if args.initial_eep is not None:
-        initial_eep = [float(e) for e in args.initial_eep]
-        eep = state_to_eep(initial_eep, 0)
-        widowx_client.move_gripper(1.0)
-        move_status = None
-        while move_status != WidowXStatus.SUCCESS:
-            move_status = widowx_client.move(eep, duration=1.5)
-
-    last_tstep = time.time()
-    images = []
-    image_goals = []
-    t = 0
-    obs_hist = deque(maxlen=obs_horizon) if (obs_horizon and obs_horizon > 1) else None
-    is_gripper_closed = False
-    num_consecutive_gripper_change_actions = 0
-
-    try:
-        # optionally request goal
-        if args.goal_type == "gc":
-            image_goal = request_goal_image(image_goal, widowx_client, args.im_size)
-            goal_obs = {"image": image_goal}
-            input("Press [Enter] to start.")
+        # First list candidates, then load only the selected policy to avoid heavy init
+        names = [os.path.basename(p.rstrip("/")) for p in run_dirs]
+        if len(names) == 1:
+            selected = 0
         else:
-            goal_obs = {"image": np.zeros((args.im_size, args.im_size, 3), dtype=np.uint8)}
-            input("Press [Enter] to start BC evaluation.")
+            if args.policy_index is not None:
+                selected = int(args.policy_index)
+                if selected < 0 or selected >= len(names):
+                    raise ValueError(f"policy_index out of range: got {selected}, available [0..{len(names)-1}]")
+            else:
+                print("policies:")
+                for i, n in enumerate(names):
+                    print(f"{i}) {n}")
+                selected = int(input("select policy: "))
 
-        while t < args.num_timesteps:
-            if time.time() > last_tstep + STEP_DURATION or args.blocking:
-                obs = widowx_client.get_observation()
-                if obs is None:
-                    print("WARNING retrying to get observation...")
-                    continue
+        # After selecting run, optionally select ckpt from that run
+        chosen_run = run_dirs[selected]
+        ckpt_files = _list_ckpts(chosen_run)
+        if not ckpt_files:
+            raise FileNotFoundError(f"No checkpoints in {chosen_run}")
+        if len(ckpt_files) == 1:
+            chosen_ckpt = ckpt_files[0]
+        else:
+            # show list and let user pick
+            print("checkpoints:")
+            for i, p in enumerate(ckpt_files):
+                print(f"{i}) {os.path.basename(p)}")
+            try:
+                ckpt_idx = int(input("select ckpt (default latest): ") or str(len(ckpt_files) - 1))
+            except Exception:
+                ckpt_idx = len(ckpt_files) - 1
+            if ckpt_idx < 0 or ckpt_idx >= len(ckpt_files):
+                ckpt_idx = len(ckpt_files) - 1
+            chosen_ckpt = ckpt_files[ckpt_idx]
 
-                if args.show_image:
-                    bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
-                    cv2.imshow("img_view", bgr_img)
-                    cv2.waitKey(10)
+        # Load the selected policy with the chosen ckpt
+        picked = _load_policy(chosen_run, device, args.im_size, ckpt_path=chosen_ckpt)
 
-                image_obs = (
-                    obs["image"].reshape(3, args.im_size, args.im_size).transpose(1, 2, 0) * 255
-                ).astype(np.uint8)
-                curr = {"image": image_obs, "proprio": obs["state"]}
-                if obs_hist is not None:
-                    if len(obs_hist) == 0:
-                        obs_hist.extend([curr] * obs_hist.maxlen)
-                    else:
-                        obs_hist.append(curr)
-                    model_obs = stack_obs(list(obs_hist))
-                else:
-                    model_obs = curr
-
-                last_tstep = time.time()
-                actions = get_action(model_obs, goal_obs)
-                if actions.ndim == 1:
-                    actions = actions[None]
-                for i in range(args.act_exec_horizon):
-                    action = actions[i]
-                    action += np.random.normal(0, FIXED_STD)
-
-                    # sticky gripper logic
-                    if (action[-1] < 0.5) != is_gripper_closed:
-                        num_consecutive_gripper_change_actions += 1
-                    else:
-                        num_consecutive_gripper_change_actions = 0
-
-                    if num_consecutive_gripper_change_actions >= STICKY_GRIPPER_NUM_STEPS:
-                        is_gripper_closed = not is_gripper_closed
-                        num_consecutive_gripper_change_actions = 0
-
-                    action[-1] = 0.0 if is_gripper_closed else 1.0
-
-                    # remove degrees of freedom
-                    if NO_PITCH_ROLL:
-                        action[3] = 0
-                        action[4] = 0
-                    if NO_YAW:
-                        action[5] = 0
-
-                    widowx_client.step_action(action, blocking=args.blocking)
-
-                    images.append(image_obs)
-                    if args.goal_type == "gc":
-                        image_goals.append(image_goal)
-                    t += 1
-    except Exception as e:
-        print(str(e), file=sys.stderr)
-
-    # save video
-    if args.video_save_path is not None:
-        os.makedirs(args.video_save_path, exist_ok=True)
-        curr_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        save_path = os.path.join(
-            args.video_save_path,
-            f"{curr_time}_torch_eval_sticky_{STICKY_GRIPPER_NUM_STEPS}.mp4",
+        # build get_action wrapper for picked policy
+        get_action = _build_get_action(
+            picked["agent"],
+            picked["kind"],
+            args.deterministic,
         )
-        if args.goal_type == "gc" and image_goals:
-            video = np.concatenate([np.stack(image_goals), np.stack(images)], axis=1)
-            imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
-        else:
-            imageio.mimsave(save_path, images, fps=1.0 / STEP_DURATION * 3)
+        obs_horizon = picked["obs_horizon"]
+        act_pred_horizon = picked["act_pred_horizon"]
+
+        # optional preview before requesting goal, for monitoring camera stream
+        if args.show_image:
+            obs = widowx_client.get_observation()
+            while obs is None:
+                print("Waiting for observations...")
+                obs = widowx_client.get_observation()
+                time.sleep(1)
+            bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
+            cv2.imshow("img_view", bgr_img)
+            cv2.waitKey(100)
+
+        # load goals
+        if args.goal_type == "gc":
+            image_goal = None
+            if args.goal_image_path is not None:
+                image_goal = np.array(Image.open(args.goal_image_path))
+        else:  # bc
+            image_goal = None
+
+        # reset env
+        widowx_client.go_to_neutral()
+        time.sleep(0.5)
+
+        last_tstep = time.time()
+        images = []
+        image_goals = []
+        t = 0
+        obs_hist = deque(maxlen=obs_horizon) if (obs_horizon and obs_horizon > 1) else None
+        is_gripper_closed = False
+        num_consecutive_gripper_change_actions = 0
+        reset_requested = False
+
+        try:
+            # optionally request goal
+            if args.goal_type == "gc":
+                image_goal = request_goal_image(image_goal, widowx_client, args.im_size)
+                goal_obs = {"image": image_goal}
+                input("Press [Enter] to start.")
+            else:
+                goal_obs = {"image": np.zeros((args.im_size, args.im_size, 3), dtype=np.uint8)}
+                input("Press [Enter] to start BC evaluation.")
+
+            while t < args.num_timesteps:
+                if time.time() > last_tstep + STEP_DURATION or args.blocking:
+                    obs = widowx_client.get_observation()
+                    if obs is None:
+                        print("WARNING retrying to get observation...")
+                        continue
+
+                    if args.show_image:
+                        bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
+                        cv2.imshow("img_view", bgr_img)
+                        key = cv2.waitKey(10) & 0xFF
+                        if key in (ord('r'), ord('R')):
+                            reset_requested = True
+                            print("[INFO] Reset requested via 'R' key (OpenCV)")
+                            break
+                    else:
+                        # stdin fallback (requires Enter after 'r')
+                        if _stdin_has_data():
+                            try:
+                                line = sys.stdin.readline().strip()
+                                if line.lower() == 'r':
+                                    reset_requested = True
+                                    print("[INFO] Reset requested via 'R' (stdin)")
+                                    break
+                            except Exception:
+                                pass
+
+                    image_obs = (
+                        obs["image"].reshape(3, args.im_size, args.im_size).transpose(1, 2, 0) * 255
+                    ).astype(np.uint8)
+                    curr = {"image": image_obs, "proprio": obs["state"]}
+                    if obs_hist is not None:
+                        if len(obs_hist) == 0:
+                            obs_hist.extend([curr] * obs_hist.maxlen)
+                        else:
+                            obs_hist.append(curr)
+                        model_obs = stack_obs(list(obs_hist))
+                    else:
+                        model_obs = curr
+
+                    last_tstep = time.time()
+                    actions = get_action(model_obs, goal_obs)
+                    if actions.ndim == 1:
+                        actions = actions[None]
+                    for i in range(args.act_exec_horizon):
+                        action = actions[i]
+                        action += np.random.normal(0, FIXED_STD)
+
+                        # sticky gripper logic
+                        if (action[-1] < 0.5) != is_gripper_closed:
+                            num_consecutive_gripper_change_actions += 1
+                        else:
+                            num_consecutive_gripper_change_actions = 0
+
+                        if num_consecutive_gripper_change_actions >= STICKY_GRIPPER_NUM_STEPS:
+                            is_gripper_closed = not is_gripper_closed
+                            num_consecutive_gripper_change_actions = 0
+
+                        action[-1] = 0.0 if is_gripper_closed else 1.0
+
+                        # remove degrees of freedom
+                        if NO_PITCH_ROLL:
+                            action[3] = 0
+                            action[4] = 0
+                        if NO_YAW:
+                            action[5] = 0
+
+                        widowx_client.step_action(action, blocking=args.blocking)
+
+                        images.append(image_obs)
+                        if args.goal_type == "gc":
+                            image_goals.append(image_goal)
+                        t += 1
+        except KeyboardInterrupt:
+            print("[INFO] Ctrl+C received; moving robot to neutral...", file=sys.stderr)
+            try:
+                widowx_client.go_to_neutral()
+            except Exception as _e:
+                print(f"[WARN] Failed to move to neutral: {_e}", file=sys.stderr)
+            sys.exit(0)
+        except Exception as e:
+            print(str(e), file=sys.stderr)
+
+        # handle reset vs normal completion
+        if reset_requested:
+            try:
+                widowx_client.go_to_neutral()
+            except Exception as _e:
+                print(f"[WARN] Failed to move to neutral on reset: {_e}", file=sys.stderr)
+            if args.show_image:
+                try:
+                    cv2.destroyAllWindows()
+                except Exception:
+                    pass
+            # Loop back to selection stage
+            continue
+
+        # save video on normal completion
+        if args.video_save_path is not None:
+            os.makedirs(args.video_save_path, exist_ok=True)
+            curr_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            save_path = os.path.join(
+                args.video_save_path,
+                f"{curr_time}_torch_eval_sticky_{STICKY_GRIPPER_NUM_STEPS}.mp4",
+            )
+            if args.goal_type == "gc" and image_goals:
+                video = np.concatenate([np.stack(image_goals), np.stack(images)], axis=1)
+                imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
+            else:
+                imageio.mimsave(save_path, images, fps=1.0 / STEP_DURATION * 3)
+
+        # exit after one run unless user requested reset
+        break
 
 
 if __name__ == "__main__":

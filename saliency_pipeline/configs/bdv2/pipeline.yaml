@@ -9,7 +9,7 @@ dataset:
 
 run:
   # bdv2_single | bdv2_task | bdv2_all
-  mode: bdv2_all
+  mode: bdv2_task
   bdv2_single:
     task: "lift_carrot_100"
     timestamp: "2025-09-07_20-48-07"
@@ -17,15 +17,15 @@ run:
     traj_name: "traj0"
     camera: 0
   bdv2_task:
-    task: "lift_carrot_100"
+    task: "pull_pot_100_confounded"
     camera: 0
   bdv2_all:
     # 对 dataset_root 下所有任务遍历，使用同一相机索引
     camera: 0
 
 stages:
-  global_desc: false
-  vlm_filter: false
+  global_desc: true
+  vlm_filter: true
   bbox_to_dataset: true
 
 processing:
@@ -84,7 +84,7 @@ global_desc:
 vlm_filter:
   vlm_enabled: false
   grounding_model_id: "IDEA-Research/grounding-dino-base"
-  device: "cuda:1"
+  device: "cuda:2"
   yolo:
     enabled: true
     model_path: "/home/vla-reasoning/proj/vlm-gabril/GABRIL-CARLA/saliency_pipeline/models/yolo_widowx_gripper.pt"

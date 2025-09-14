@@ -133,28 +133,29 @@ class BridgeDataset(Dataset):
                 "random_hue",
             ],
         )
+        p = ak.get("p", 0.5)
         ops: List[A.BasicTransform] = []
         for op in order:
             if op == "random_resized_crop" and ("random_resized_crop" in ak):
                 rrc = ak["random_resized_crop"]
                 scale = tuple(rrc.get("scale", [0.8, 1.0]))
                 ratio = tuple(rrc.get("ratio", [0.9, 1.1]))
-                ops.append(A.RandomResizedCrop(height=H, width=W, scale=scale, ratio=ratio, interpolation=cv2.INTER_LINEAR, p=1.0))
+                ops.append(A.RandomResizedCrop(height=H, width=W, scale=scale, ratio=ratio, interpolation=cv2.INTER_LINEAR))
             elif op == "random_brightness" and ("random_brightness" in ak):
                 br = _to_pair(ak["random_brightness"], around1=True)
-                ops.append(A.ColorJitter(brightness=br, contrast=0, saturation=0, hue=0, p=1.0))
+                ops.append(A.ColorJitter(brightness=br, contrast=0, saturation=0, hue=0))
             elif op == "random_contrast" and ("random_contrast" in ak):
                 ct = _to_pair(ak["random_contrast"], around1=True)
-                ops.append(A.ColorJitter(brightness=0, contrast=ct, saturation=0, hue=0, p=1.0))
+                ops.append(A.ColorJitter(brightness=0, contrast=ct, saturation=0, hue=0))
             elif op == "random_saturation" and ("random_saturation" in ak):
                 st = _to_pair(ak["random_saturation"], around1=True)
-                ops.append(A.ColorJitter(brightness=0, contrast=0, saturation=st, hue=0, p=1.0))
+                ops.append(A.ColorJitter(brightness=0, contrast=0, saturation=st, hue=0))
             elif op == "random_hue" and ("random_hue" in ak):
                 hu = _to_pair(ak["random_hue"], symm=True)
-                ops.append(A.ColorJitter(brightness=0, contrast=0, saturation=0, hue=hu, p=1.0))
+                ops.append(A.ColorJitter(brightness=0, contrast=0, saturation=0, hue=hu))
             else:
                 continue
-        return A.ReplayCompose(ops, p=1.0)
+        return A.ReplayCompose(ops, p=p)
 
     # ----- Builders -----
     def _make_obs_image(self, traj: dict, t: int, batch_replay: Optional[dict] = None) -> Tuple[torch.Tensor, Optional[dict]]:
@@ -246,6 +247,14 @@ class BridgeDataset(Dataset):
             sal = agg  # HWC with C=1
         else:
             sal = obs["saliency"].astype(np.float32)
+        # If augmented, apply the same spatial crop/resize to saliency via replay.
+        # Treat saliency as a mask to avoid color jitter.
+        if self.train and self.augment and replay is not None:
+            img_ref = obs["images0"]  # HWC reference image for consistent replay
+            out = A.ReplayCompose.replay(replay, image=img_ref, mask=sal)
+            sal = out["mask"]
+            if sal.ndim == 2:
+                sal = sal[..., None]
         t_sal = torch.as_tensor(sal.transpose(2, 0, 1), dtype=torch.float32)
         # normalize to [0,1]
         mn = t_sal.amin(dim=(-2, -1), keepdim=True)

@@ -16,7 +16,7 @@ saliency:
 
 # Experiment naming (used for save_dir/run folder name prefix)
 # Override on CLI: name=myexp
-name: "test_run"
+name: ""
 # task_stack_proprio_saliency_
 
 # Debug mode (disables W&B online if your WandB wrapper uses it)

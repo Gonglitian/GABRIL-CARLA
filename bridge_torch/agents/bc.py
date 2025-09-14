@@ -57,8 +57,9 @@ class GaussianPolicy(nn.Module):
             self.register_buffer("fixed_std", fs)
 
     def forward(self, obs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        x = obs["image"]  # (N, C, H, W)
-        z = self.encoder(x)
+        x = obs["image"]  # (B, C, H, W)
+        z_map: torch.Tensor = self.encoder(x)
+        z = z_map.flatten(1)
         if self.use_proprio and ("proprio" in obs):
             prop = obs["proprio"]
             if prop.dim() > 2:
@@ -70,7 +71,7 @@ class GaussianPolicy(nn.Module):
             std = torch.exp(self.log_std(h)).clamp(min=1e-4, max=10.0)
         else:
             std = self.fixed_std.expand_as(mu)
-        return {"mu": mu, "std": std}
+        return {"mu": mu, "std": std, "z_map": z_map}
 
     def dist(self, out: Dict[str, torch.Tensor]):
         mu, std = out["mu"], out["std"]
@@ -124,43 +125,7 @@ class BCAgent:
         self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
         self._saliency_weight = float(sal_cfg.get("weight", 1.0))
         self._saliency_beta = float(sal_cfg.get("beta", 1.0))
-        self._last_spatial = None
-        if self._saliency_enabled:
-            self._register_spatial_hook()
-
-    def _register_spatial_hook(self) -> None:
-        """Register a hook to capture pre-pool spatial features (B,C,H,W).
-
-        Capturing the encoder's last 4D output by iterating all modules can
-        accidentally latch onto post-pooling activations (e.g., (B,C,1,1)),
-        which destroys spatial information and yields degenerate saliency maps.
-        Here we prefer the output of the encoder's spatial stage before pooling
-        when available (e.g., `add_coords` or `stem` for ResNetV1Bridge).
-        """
-
-        def _hook(_module, _inp, out):
-            try:
-                if isinstance(out, torch.Tensor) and out.dim() == 4:
-                    self._last_spatial = out
-            except Exception:
-                pass
-            return None
-
-        enc = getattr(self.model, "encoder", None)
-        m_to_hook = None
-        # Prefer hooking right before pooling in ResNetV1Bridge
-        if enc is not None:
-            # If the encoder exposes an `add_coords` block, it's right before pooling
-            if hasattr(enc, "add_coords") and isinstance(getattr(enc, "add_coords"), nn.Module):
-                m_to_hook = enc.add_coords
-            # Otherwise, fall back to the stem output
-            elif hasattr(enc, "stem") and isinstance(getattr(enc, "stem"), nn.Module):
-                m_to_hook = enc.stem
-        # As a final fallback, register on the encoder itself
-        if m_to_hook is None:
-            m_to_hook = enc if isinstance(enc, nn.Module) else self.model.encoder
-        m_to_hook.register_forward_hook(_hook)
-
+            
     def update(self, batch: Dict[str, torch.Tensor]):
         self.model.train()
         base = self.model.module if hasattr(self.model, "module") else self.model
@@ -181,10 +146,9 @@ class BCAgent:
         reg_loss = torch.tensor(0.0, device=self.device)
         # Saliency regularization (Reg variant)
         if self._saliency_enabled and ("saliency" in obs):
-            z_map = self._last_spatial  # (B,C,Hf,Wf)
+            z_map = out["z_map"]  # (B,C,Hf,Wf)
             # print(f"z_map.shape: {z_map.shape}")
             # print(f"obs['saliency'].shape: {obs['saliency'].shape}")
-            self._last_spatial = None  # reset for next step
             if z_map is not None and z_map.dim() == 4:
                 target = obs["saliency"]  # (B,1,H,W)
                 H, W = int(target.shape[-2]), int(target.shape[-1])

@@ -32,6 +32,7 @@ data:
   shuffle_buffer_size: 25000
   augment_next_obs_goal_differently: false
   augment_kwargs:
+    p: 0.5
     random_resized_crop:
       scale: [0.8, 1.0]
       ratio: [0.9, 1.1]
@@ -39,12 +40,7 @@ data:
     random_contrast: [0.8, 1.2]
     random_saturation: [0.8, 1.2]
     random_hue: [0.1]
-    augment_order: [random_brightness, random_contrast, random_saturation, random_hue]
+    augment_order: [random_resized_crop,random_brightness, random_contrast, random_saturation, random_hue]
 
 # Encoder
-encoder: resnetv1-34-bridge
-encoder_kwargs:
-  pooling_method: avg
-  add_spatial_coordinates: true
-  act: swish
-  arch: resnet34
+encoder: resnet101

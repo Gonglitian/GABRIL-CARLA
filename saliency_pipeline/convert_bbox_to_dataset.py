@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert BBoxes To Dataset
+Convert BBoxes To Dataset (Only for CARLA)
 
 Reads per-frame bounding boxes from saliency_exp_results JSON files and saves
 them into the Bench2Drive dataset structure as .pt tensors:

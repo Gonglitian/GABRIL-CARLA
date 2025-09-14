@@ -38,3 +38,5 @@ backup/
 CLAUDE.md
 
 .hydra/
+glob_code.py
+rclone_setup.md

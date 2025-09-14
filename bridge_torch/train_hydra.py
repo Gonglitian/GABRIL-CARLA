@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from torch.amp import autocast, GradScaler
 
-from models.encoders import build_encoder
+from models.encoders import ResNetV1Bridge
 from agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC, GaussianPolicy
 from data.bridge_numpy import build_bridge_dataset, make_dataloader
 from torch.utils.data.distributed import DistributedSampler
@@ -112,8 +112,39 @@ def main(cfg: DictConfig) -> None:
         wb_cfg = getattr(cfg, "wandb", {}) or {}
         wb_enabled = bool(wb_cfg.get("enabled", True)) if isinstance(wb_cfg, dict) else True
         project_name = wb_cfg.get("project", "bridgedata_torch") if isinstance(wb_cfg, dict) else "bridgedata_torch"
-        exp_descriptor = str(getattr(cfg, "name", ""))
+        
+        # Auto-generate experiment descriptor based on configuration parameters
+        def generate_exp_descriptor(cfg):
+            parts = []
+            # Get task name
+            parts.append(cfg["bridgedata"]["task_name"])
+            
+            # Proprioception usage
+            use_proprio = cfg["algo"]["model"]["use_proprio"]
+            if use_proprio:
+                parts.append("proprio")
+            # Observation horizon
+            obs_horizon = cfg["algo"]["data"]["obs_horizon"]
+            parts.append(f"s{obs_horizon}")
+            # Saliency configuration
+            saliency_enabled = cfg["saliency"]["enabled"]
+            if saliency_enabled:
+                parts.append("saliency")
+            else:
+                parts.append("no_saliency")
 
+            # Encoder architecture
+            parts.append(cfg["algo"]["encoder"])
+            
+            return "_".join(parts)
+        
+        # Use custom name if provided, otherwise auto-generate
+        custom_name = str(getattr(cfg, "name", "")).strip()
+        if custom_name:
+            exp_descriptor = custom_name
+        else:
+            exp_descriptor = generate_exp_descriptor(cfg)
+        
         wandb_config = WandBLogger.get_default_config()
         cfg_plain = OmegaConf.to_container(cfg, resolve=True)
         wandb_config.update({"project": project_name, "exp_descriptor": exp_descriptor})
@@ -192,15 +223,9 @@ def main(cfg: DictConfig) -> None:
         logging.info("Obs batch shape: %s, action_dim: %s, goal shape: %s", obs_shape, action_dim, goal_shape)
 
     # Build encoder — 容错读取（若未从 algo 预设合成成功则回退到默认）
-    enc_name = cfg.get("encoder", "resnetv1-34-bridge") if isinstance(cfg, DictConfig) else getattr(cfg, "encoder", "resnetv1-34-bridge")
-    enc_kwargs_obj = cfg.get("encoder_kwargs", {}) if isinstance(cfg, DictConfig) else getattr(cfg, "encoder_kwargs", {})
-    enc_kwargs = OmegaConf.to_container(enc_kwargs_obj, resolve=True) if isinstance(enc_kwargs_obj, DictConfig) else (dict(enc_kwargs_obj) if isinstance(enc_kwargs_obj, dict) else {})
-    if "arch" not in enc_kwargs:
-        enc_kwargs.setdefault("pooling_method", "avg")
-        enc_kwargs.setdefault("add_spatial_coordinates", True)
-        enc_kwargs.setdefault("act", "swish")
-        enc_kwargs["arch"] = "resnet34"
-    enc = build_encoder(enc_name, **enc_kwargs).to(device)
+    enc_name = cfg["algo"]["encoder"]
+    # print(f"enc_name: {enc_name}")
+    enc = ResNetV1Bridge(arch=enc_name).to(device)
 
     # torch.compile on encoder if enabled (and not DDP-active)
     compile_enabled = getattr(cfg, "compile", {}).get("enabled", False)
@@ -216,8 +241,8 @@ def main(cfg: DictConfig) -> None:
     _warm = warmup_batch["observations"]["image"].to(device)
     if _warm.dim() == 4:
         _warm = _warm.contiguous(memory_format=torch.channels_last)
-    _ = enc(_warm)
-    enc_feat = getattr(enc, "_feat_dim")
+    _ = enc.adapt_to_input_channels(_warm)
+    enc_feat = enc.num_output_features
     # Model/policy configuration (flattened Hydra schema)
     model_cfg_obj = cfg.get("model", {}) if isinstance(cfg, DictConfig) else getattr(cfg, "model", {})
     model_cfg = OmegaConf.to_container(model_cfg_obj, resolve=True) if isinstance(model_cfg_obj, DictConfig) else (dict(model_cfg_obj) if isinstance(model_cfg_obj, dict) else {})
@@ -226,37 +251,20 @@ def main(cfg: DictConfig) -> None:
     if bool(model_cfg.get("use_proprio", False)) and ("proprio" in warmup_batch["observations"]):
         prop_dim = int(warmup_batch["observations"]["proprio"].shape[1])
 
-    # 统一解析 saliency 配置（顶层优先）
+    # 解析顶层 saliency 配置
     def _resolve_saliency(dc: DictConfig) -> dict:
-        s = {}
         if hasattr(dc, "saliency") and dc.saliency is not None:
-            s = OmegaConf.to_container(dc.saliency, resolve=True)  # type: ignore
-        else:
-            # 兼容旧路径：bc/gc_bc 在 policy_kwargs.saliency，ddpm 在 agent_kwargs.saliency
-            try:
-                pk = dc.agent_kwargs.get("policy_kwargs", {})
-                if isinstance(pk, DictConfig):
-                    pk = OmegaConf.to_container(pk, resolve=True)
-                s = dict(pk.get("saliency", {}))
-            except Exception:
-                pass
-            if not s:
-                try:
-                    s = dict(dc.agent_kwargs.get("saliency", {}))
-                except Exception:
-                    s = {}
-        # 归一化键与类型
-        if s:
-            s = {
-                "enabled": bool(str(s.get("enabled", False)).lower() in {"1","true","t","yes","y","on"}),
+            s = OmegaConf.to_container(dc.saliency, resolve=True)
+            return {
+                "enabled": bool(s.get("enabled", False)),
                 "weight": float(s.get("weight", 0.0)),
                 "beta": float(s.get("beta", 1.0)),
             }
-        return s
+        return {"enabled": False, "weight": 0.0, "beta": 1.0}
 
     sal_cfg = _resolve_saliency(cfg)
 
-    # Build BC agent/model
+    # Build BC agent/model3
     mlp = MLP_BC(input_dim=enc_feat + prop_dim, hidden_dims=tuple(model_cfg.get("hidden_dims", [256,256,256])), dropout_rate=float(model_cfg.get("dropout_rate", 0.0)))
     policy_kwargs = {
         "tanh_squash_distribution": bool(model_cfg.get("tanh_squash_distribution", False)),

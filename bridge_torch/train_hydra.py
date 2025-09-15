@@ -190,6 +190,12 @@ def main(cfg: DictConfig) -> None:
     if cfg.saliency and cfg.saliency.alpha:
         data_kwargs.setdefault("saliency_alpha", float(cfg.saliency.alpha))
 
+    # Determine if we need to load images based on encoder configuration
+    enc_name = cfg.algo.encoder
+    load_images = enc_name.lower() != "none"
+    if is_main_process():
+        logging.info("Loading images: %s (encoder: %s)", load_images, enc_name)
+
     train_ds = build_bridge_dataset(
         task_globs=bdcfg.include,
         data_root=str(cfg.data_path),
@@ -197,6 +203,7 @@ def main(cfg: DictConfig) -> None:
         seed=train_seed,
         bridgedata_cfg=bdcfg,
         dataset_kwargs=data_kwargs,
+        load_images=load_images,
     )
     val_ds = build_bridge_dataset(
         task_globs=bdcfg.include,
@@ -205,6 +212,7 @@ def main(cfg: DictConfig) -> None:
         seed=val_seed,
         bridgedata_cfg=bdcfg,
         dataset_kwargs=data_kwargs,
+        load_images=load_images,
     )
 
     # DataLoaders

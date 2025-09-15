@@ -51,6 +51,7 @@ class BridgeDataset(Dataset):
         saliency_alpha: Optional[float] = None,
         action_proprio_metadata: Optional[dict] = None,
         sample_weights: Optional[List[float]] = None,
+        load_images: bool = True,
         **_: dict,
     ) -> None:
         super().__init__()
@@ -66,6 +67,7 @@ class BridgeDataset(Dataset):
         self.augment = bool(augment)
         self.augment_next_obs_goal_differently = bool(augment_next_obs_goal_differently)
         self.apm = action_proprio_metadata or {}
+        self.load_images = bool(load_images)
         
         self.augment_kwargs = augment_kwargs
         self._albu_cache: dict[tuple[int, int], A.ReplayCompose] = {}
@@ -136,8 +138,10 @@ class BridgeDataset(Dataset):
         return A.ReplayCompose(ops, p=p)
 
     # ----- Builders -----
-    def _make_obs_image(self, traj: dict, t: int, batch_replay: Optional[dict] = None) -> Tuple[torch.Tensor, Optional[dict]]:
-        # returns (C,H,W float[0,1], replay_params)
+    def _make_obs_image(self, traj: dict, t: int, batch_replay: Optional[dict] = None) -> Tuple[Optional[torch.Tensor], Optional[dict]]:
+        # returns (C,H,W float[0,1], replay_params) or (None, None) if load_images=False
+        if not self.load_images:
+            return None, None
         if self.obs_h > 1:
             t0 = max(0, t - (self.obs_h - 1))
             frames = [traj["observations"][k]["images0"] for k in range(t0, t + 1)]  # THWC
@@ -182,8 +186,10 @@ class BridgeDataset(Dataset):
             t_img = torch.as_tensor(img.transpose(2, 0, 1), dtype=torch.float32) / 255.0
             return t_img.contiguous(), replay
 
-    def _make_goal_image(self, traj: dict, t: int, replay: Optional[dict]) -> torch.Tensor:
-        # pick goal image per strategy
+    def _make_goal_image(self, traj: dict, t: int, replay: Optional[dict]) -> Optional[torch.Tensor]:
+        # pick goal image per strategy, returns None if load_images=False
+        if not self.load_images:
+            return None
         if self.goal_strategy == "uniform":
             T = len(traj["observations"]) - 1
             g_t = self.rng.randrange(t, T + 1)
@@ -205,6 +211,8 @@ class BridgeDataset(Dataset):
         return t_img.contiguous()
 
     def _make_saliency(self, traj: dict, t: int, replay: Optional[dict]) -> Optional[torch.Tensor]:
+        if not self.load_images:
+            return None
         obs = traj["observations"][t]
         if "saliency" not in obs or obs["saliency"] is None:
             return None
@@ -268,7 +276,9 @@ class BridgeDataset(Dataset):
         else:
             acts = np.asarray(traj["actions"][t], dtype=np.float32)
 
-        obs_dict: Dict[str, torch.Tensor] = {"image": obs_img.contiguous()}
+        obs_dict: Dict[str, torch.Tensor] = {}
+        if obs_img is not None:
+            obs_dict["image"] = obs_img.contiguous()
         if prop_seq is not None:
             p = np.asarray(prop_seq, dtype=np.float32)
             if p.ndim > 1:
@@ -279,23 +289,25 @@ class BridgeDataset(Dataset):
 
         # tile goal channels if obs has T>1 (C != 3)
         g = goal_img
-        if g.shape[0] != obs_img.shape[0]:
-            if g.shape[0] == 3 and obs_img.shape[0] % 3 == 0:
-                k = obs_img.shape[0] // 3
-                g = g.repeat(k, 1, 1)
-            else:
-                # simple pad/trim fallback
-                if g.shape[0] < obs_img.shape[0]:
-                    pad = obs_img.shape[0] - g.shape[0]
-                    g = torch.cat([g, g[:pad]], dim=0)
+        if g is not None and obs_img is not None:
+            if g.shape[0] != obs_img.shape[0]:
+                if g.shape[0] == 3 and obs_img.shape[0] % 3 == 0:
+                    k = obs_img.shape[0] // 3
+                    g = g.repeat(k, 1, 1)
                 else:
-                    g = g[:obs_img.shape[0]]
+                    # simple pad/trim fallback
+                    if g.shape[0] < obs_img.shape[0]:
+                        pad = obs_img.shape[0] - g.shape[0]
+                        g = torch.cat([g, g[:pad]], dim=0)
+                    else:
+                        g = g[:obs_img.shape[0]]
 
         out = {
             "observations": obs_dict,
-            "goals": {"image": g.contiguous()},
             "actions": torch.from_numpy(acts),
         }
+        if g is not None:
+            out["goals"] = {"image": g.contiguous()}
         return out
 
     def iterator(self, batch_size: int):
@@ -361,11 +373,13 @@ class BridgeDataset(Dataset):
                 act_list.append(acts)
 
             # Stack batch tensors
-            obs_img_t = torch.stack(obs_imgs, dim=0)
-            goal_img_t = torch.stack(goal_imgs, dim=0)
+            obs_img_t = torch.stack(obs_imgs, dim=0) if obs_imgs and obs_imgs[0] is not None else None
+            goal_img_t = torch.stack(goal_imgs, dim=0) if goal_imgs and goal_imgs[0] is not None else None
             actions_t = torch.from_numpy(np.stack(act_list, axis=0))
 
-            obs_dict: Dict[str, torch.Tensor] = {"image": obs_img_t}
+            obs_dict: Dict[str, torch.Tensor] = {}
+            if obs_img_t is not None:
+                obs_dict["image"] = obs_img_t
             # proprio stacking
             if any(p is not None for p in prop_list):
                 # fill missing with zeros like shape of first non-None
@@ -388,18 +402,21 @@ class BridgeDataset(Dataset):
 
             batch = {
                 "observations": obs_dict,
-                "goals": {"image": goal_img_t},
                 "actions": actions_t,
             }
+            if goal_img_t is not None:
+                batch["goals"] = {"image": goal_img_t}
 
             # Pin memory for faster H2D copies
             try:
-                batch["observations"]["image"] = batch["observations"]["image"].pin_memory()
+                if "image" in batch["observations"]:
+                    batch["observations"]["image"] = batch["observations"]["image"].pin_memory()
                 if "proprio" in batch["observations"]:
                     batch["observations"]["proprio"] = batch["observations"]["proprio"].pin_memory()
                 if "saliency" in batch["observations"]:
                     batch["observations"]["saliency"] = batch["observations"]["saliency"].pin_memory()
-                batch["goals"]["image"] = batch["goals"]["image"].pin_memory()
+                if "goals" in batch and "image" in batch["goals"]:
+                    batch["goals"]["image"] = batch["goals"]["image"].pin_memory()
                 batch["actions"] = batch["actions"].pin_memory()
             except Exception:
                 pass
@@ -415,6 +432,7 @@ def build_bridge_dataset(
     seed: int,
     bridgedata_cfg,
     dataset_kwargs: Dict,
+    load_images: bool = True,
 ) -> BridgeDataset:
     # Resolve directories that contain out.npy
     inc = getattr(bridgedata_cfg, "include", [])
@@ -440,7 +458,7 @@ def build_bridge_dataset(
             f"No out.npy found: include={inc_list}, data_root={data_root}, split={split}. "
             "Check bridgedata preset and data_path."
         )
-    return BridgeDataset(task_files, seed=seed, train=(split == "train"), action_proprio_metadata=bridgedata_cfg.action_proprio_metadata, **dataset_kwargs)
+    return BridgeDataset(task_files, seed=seed, train=(split == "train"), action_proprio_metadata=bridgedata_cfg.action_proprio_metadata, load_images=load_images, **dataset_kwargs)
 
 
 def make_dataloader(

@@ -115,7 +115,6 @@ class BCAgent:
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
         # Scheduler selectable via config.scheduler.type
         self.scheduler = None
-        print(f"cfg.scheduler: {cfg.scheduler}")
         sched_type = cfg.scheduler["type"]
         if sched_type == "constant":
             self.scheduler = None

@@ -159,7 +159,7 @@ def _build_agent_from_config(cfg, device: torch.device, im_size: int):
     # Use new schema under model
     model_cfg = cfg.algo.model
     use_proprio = True if is_state_only else model_cfg.use_proprio
-    prop_dim = 7 if use_proprio else 0
+    prop_dim = 7 * obs_horizon if use_proprio else 0
 
     # Only BC supported in refactor
     mlp = MLP_BC(

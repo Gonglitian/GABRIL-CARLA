@@ -1,30 +1,31 @@
 #!/bin/bash
 
 # Configuration
-DEVICES="2,4,5,7"
-NPROC_PER_NODE=4
+DEVICES="2,3,4,5,7"
+NPROC_PER_NODE=5
 TASK_LIST=(
   "lift_carrot_mixed"
-  "pull_pot_100"
   "pull_pot_mixed"
+  "pull_pot_100"
   "put_carrot_in_pot_100"
 )
 
 # Common parameters
 COMMON_ARGS="
   algo=bc
-  algo.encoder=resnet101
+  algo.encoder=resnet34
   algo.model.use_proprio=true
   algo.data.obs_horizon=2
-  saliency.enabled=true
+  saliency.enabled=false
   saliency.weight=5
   saliency.alpha=0.7
-  batch_size=1000
+  batch_size=1500
   num_steps=10000
-  eval_interval=500
-  save_interval=500
+  eval_interval=2000
+  save_interval=2000
   log_interval=10
 "
+
 
 # Run training for each task
 for task in "${TASK_LIST[@]}"; do

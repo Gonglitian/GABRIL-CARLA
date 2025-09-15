@@ -40,3 +40,5 @@ CLAUDE.md
 .hydra/
 glob_code.py
 rclone_setup.md
+
+draw_plot/

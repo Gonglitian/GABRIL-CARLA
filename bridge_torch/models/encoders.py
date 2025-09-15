@@ -27,7 +27,11 @@ class ResNetV1Bridge(nn.Module):
         self.num_output_features = None
         
     def adapt_to_input_channels(self, x: torch.Tensor):
-        """Call this at the start of forward, to adapt conv1 if input channels != expected"""
+        """Adapt conv1 if input channels do not match the incoming tensor.
+
+        This modifies the first convolution to accept arbitrary input channels
+        by replicating the average across original RGB weights.
+        """
         in_ch = int(x.shape[1])
         conv1: nn.Conv2d = self.stem[0]
 
@@ -47,8 +51,45 @@ class ResNetV1Bridge(nn.Module):
                 new.weight.copy_(new_w)
             self.stem[0] = new.to(conv1.weight.device)
             self._in_ch = in_ch
-
-        self.num_output_features = self.forward(x).flatten(1).shape[1] # in resnet101, it's 131072
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.stem(x)
+        # Ensure the input channel count is compatible with stem[0]
+        self.adapt_to_input_channels(x)
+        y = self.stem(x)
+        # Lazily set feature dimension for downstream MLP construction
+        # Flatten over all non-batch dimensions
+        try:
+            self._feat_dim = int(y.flatten(1).shape[1])
+        except Exception:
+            # Best-effort; leave unset if shape probing fails
+            pass
+        return y
+
+
+def build_encoder(name: str, **kwargs) -> nn.Module:
+    # TODO: clean this later, just for compatibility with eval.py
+    """Factory to build visual encoders.
+
+    Supported names (case-insensitive):
+    - "resnetv1-18-bridge", "resnetv1-34-bridge", "resnetv1-50-bridge",
+      "resnetv1-101-bridge", "resnetv1-152-bridge"
+    - "resnet18", "resnet34", "resnet50", "resnet101", "resnet152"
+
+    Extra kwargs are accepted for forward-compatibility and ignored here.
+    """
+    n = (name or "").lower()
+    arch = kwargs.get("arch")
+    if arch is None:
+        if "resnetv1-18" in n or n == "resnet18":
+            arch = "resnet18"
+        elif "resnetv1-34" in n or n == "resnet34" or n == "resnetv1-bridge":
+            arch = "resnet34"
+        elif "resnetv1-50" in n or n == "resnet50":
+            arch = "resnet50"
+        elif "resnetv1-101" in n or n == "resnet101":
+            arch = "resnet101"
+        elif "resnetv1-152" in n or n == "resnet152":
+            arch = "resnet152"
+        else:
+            arch = "resnet34"  # sensible default
+    return ResNetV1Bridge(arch=arch)

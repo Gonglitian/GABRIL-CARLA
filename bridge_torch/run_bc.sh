@@ -4,7 +4,7 @@
 DEVICES="2,3,4,5,7"
 NPROC_PER_NODE=5
 TASK_LIST=(
-  "lift_carrot_mixed"
+  # "lift_carrot_mixed"
   "pull_pot_mixed"
   "pull_pot_100"
   "put_carrot_in_pot_100"
@@ -19,7 +19,7 @@ COMMON_ARGS="
   saliency.enabled=false
   saliency.weight=5
   saliency.alpha=0.7
-  batch_size=1500
+  batch_size=3200
   num_steps=10000
   eval_interval=2000
   save_interval=2000

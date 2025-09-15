@@ -1,0 +1,1340 @@
+{
+  "root": "/data3/vla-reasoning/saliency_exp_results",
+  "overall": {
+    "detections_total": 272608,
+    "vlm_filtered_total": 192643,
+    "detection_classes": {
+      "vehicle": 123338,
+      "traffic light": 24697,
+      "vehicles": 18766,
+      "traffic signal": 16761,
+      "lane markings": 16379,
+      "pedestrian": 15253,
+      "street light": 13547,
+      "streetlights": 11889,
+      "fence": 7880,
+      "stop sign": 5117,
+      "fences": 4703,
+      "traffic sign road sign": 2906,
+      "sidewalks / curb": 2854,
+      "speed limit sign": 2597,
+      "bicyclist": 2484,
+      "lane markings pedestrian crosswalk": 1599,
+      "road signs": 691,
+      "vehicle bicyclist": 224,
+      "pedestrian crosswalk": 168,
+      "road sign": 97,
+      "traffic sign": 90,
+      "lane markings crosswalk": 87,
+      "traffic sign road sign traffic signal": 74,
+      "traffic signs": 55,
+      "vehiclecl": 54,
+      "roadside objects": 48,
+      "road sign traffic signal": 37,
+      "vehicle bicycl": 31,
+      "crosswalk": 20,
+      "traffic sign road sign traffic": 18,
+      "markings": 17,
+      "traffic sign road": 12,
+      "traffic sign traffic signal": 12,
+      "sidewalks curb": 10,
+      "##walk": 8,
+      "lane markingswalk": 8,
+      "road traffic signal": 7,
+      "lane pedestrian crosswalk": 6,
+      "markings pedestrian crosswalk": 6,
+      "traffic signs vehicle": 6,
+      "vehiclecycl": 6,
+      "lane": 5,
+      "street": 5,
+      "vehicle lane markings": 4,
+      "##cy": 3,
+      "vehicle bicl": 3,
+      "roadside": 2,
+      "sign": 2,
+      "signs vehicle": 2,
+      "##cyclist": 1,
+      "##lights": 1,
+      "bicy": 1,
+      "bicycl": 1,
+      "bicyist": 1,
+      "cross": 1,
+      "lane crosswalk": 1,
+      "lane markings traffic vehicle": 1,
+      "lanewalk": 1,
+      "light": 1,
+      "road": 1,
+      "road sign traffic": 1,
+      "sign road sign": 1,
+      "sign traffic signal": 1,
+      "speed": 1,
+      "traffic road sign traffic signal": 1,
+      "traffic sign road traffic signal": 1,
+      "vehicle lane": 1,
+      "vehicle traffic light": 1,
+      "vehicles speed limit sign": 1
+    },
+    "vlm_filtered_classes": {
+      "vehicle": 88629,
+      "traffic light": 17344,
+      "vehicles": 15341,
+      "lane markings": 14228,
+      "pedestrian": 11467,
+      "traffic signal": 8452,
+      "street light": 6858,
+      "streetlights": 6755,
+      "fence": 5995,
+      "stop sign": 5113,
+      "bicyclist": 2371,
+      "speed limit sign": 2323,
+      "traffic sign road sign": 2063,
+      "fences": 1494,
+      "sidewalks / curb": 1475,
+      "lane markings pedestrian crosswalk": 1247,
+      "road signs": 628,
+      "vehicle bicyclist": 220,
+      "pedestrian crosswalk": 143,
+      "road sign": 82,
+      "traffic sign": 74,
+      "vehiclecl": 52,
+      "traffic signs": 41,
+      "lane markings crosswalk": 36,
+      "roadside objects": 33,
+      "vehicle bicycl": 31,
+      "traffic sign road sign traffic signal": 30,
+      "traffic sign road sign traffic": 12,
+      "crosswalk": 11,
+      "road sign traffic signal": 11,
+      "traffic sign road": 11,
+      "markings": 8,
+      "lane pedestrian crosswalk": 6,
+      "traffic signs vehicle": 6,
+      "vehiclecycl": 6,
+      "lane": 5,
+      "markings pedestrian crosswalk": 5,
+      "sidewalks curb": 5,
+      "##walk": 4,
+      "vehicle lane markings": 4,
+      "street": 3,
+      "vehicle bicl": 3,
+      "lane markingswalk": 2,
+      "road traffic signal": 2,
+      "signs vehicle": 2,
+      "##cy": 1,
+      "##lights": 1,
+      "cross": 1,
+      "lane crosswalk": 1,
+      "lane markings traffic vehicle": 1,
+      "road": 1,
+      "sign": 1,
+      "traffic sign road traffic signal": 1,
+      "traffic sign traffic signal": 1,
+      "vehicle lane": 1,
+      "vehicle traffic light": 1,
+      "vehicles speed limit sign": 1
+    }
+  },
+  "per_route_seed": [
+    {
+      "route": "route_2416",
+      "seed": "seed_200",
+      "detections": 1017,
+      "vlm_filtered": 780
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_201",
+      "detections": 1042,
+      "vlm_filtered": 776
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_202",
+      "detections": 674,
+      "vlm_filtered": 570
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_203",
+      "detections": 844,
+      "vlm_filtered": 706
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_204",
+      "detections": 908,
+      "vlm_filtered": 723
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_205",
+      "detections": 864,
+      "vlm_filtered": 682
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_206",
+      "detections": 916,
+      "vlm_filtered": 694
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_207",
+      "detections": 839,
+      "vlm_filtered": 746
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_208",
+      "detections": 831,
+      "vlm_filtered": 665
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_209",
+      "detections": 752,
+      "vlm_filtered": 612
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_210",
+      "detections": 909,
+      "vlm_filtered": 694
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_211",
+      "detections": 878,
+      "vlm_filtered": 664
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_212",
+      "detections": 930,
+      "vlm_filtered": 730
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_213",
+      "detections": 881,
+      "vlm_filtered": 749
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_214",
+      "detections": 654,
+      "vlm_filtered": 538
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_215",
+      "detections": 793,
+      "vlm_filtered": 616
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_216",
+      "detections": 857,
+      "vlm_filtered": 667
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_217",
+      "detections": 878,
+      "vlm_filtered": 693
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_218",
+      "detections": 653,
+      "vlm_filtered": 521
+    },
+    {
+      "route": "route_2416",
+      "seed": "seed_219",
+      "detections": 760,
+      "vlm_filtered": 683
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_200",
+      "detections": 1353,
+      "vlm_filtered": 1058
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_201",
+      "detections": 1386,
+      "vlm_filtered": 1133
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_202",
+      "detections": 1556,
+      "vlm_filtered": 1188
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_203",
+      "detections": 1327,
+      "vlm_filtered": 1004
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_204",
+      "detections": 1441,
+      "vlm_filtered": 1099
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_205",
+      "detections": 1429,
+      "vlm_filtered": 1125
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_206",
+      "detections": 1480,
+      "vlm_filtered": 1139
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_207",
+      "detections": 1312,
+      "vlm_filtered": 1054
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_208",
+      "detections": 1450,
+      "vlm_filtered": 1153
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_209",
+      "detections": 1447,
+      "vlm_filtered": 1104
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_210",
+      "detections": 1456,
+      "vlm_filtered": 1133
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_211",
+      "detections": 1307,
+      "vlm_filtered": 1101
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_212",
+      "detections": 1339,
+      "vlm_filtered": 1085
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_213",
+      "detections": 1261,
+      "vlm_filtered": 1019
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_214",
+      "detections": 1391,
+      "vlm_filtered": 1126
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_215",
+      "detections": 1564,
+      "vlm_filtered": 1230
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_216",
+      "detections": 1287,
+      "vlm_filtered": 1100
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_217",
+      "detections": 1440,
+      "vlm_filtered": 1141
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_218",
+      "detections": 1460,
+      "vlm_filtered": 1107
+    },
+    {
+      "route": "route_24211",
+      "seed": "seed_219",
+      "detections": 1485,
+      "vlm_filtered": 1174
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_200",
+      "detections": 894,
+      "vlm_filtered": 773
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_201",
+      "detections": 933,
+      "vlm_filtered": 797
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_202",
+      "detections": 873,
+      "vlm_filtered": 743
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_203",
+      "detections": 1002,
+      "vlm_filtered": 827
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_204",
+      "detections": 847,
+      "vlm_filtered": 688
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_205",
+      "detections": 813,
+      "vlm_filtered": 732
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_206",
+      "detections": 950,
+      "vlm_filtered": 816
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_207",
+      "detections": 944,
+      "vlm_filtered": 798
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_208",
+      "detections": 866,
+      "vlm_filtered": 740
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_209",
+      "detections": 932,
+      "vlm_filtered": 817
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_210",
+      "detections": 976,
+      "vlm_filtered": 808
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_211",
+      "detections": 892,
+      "vlm_filtered": 782
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_212",
+      "detections": 892,
+      "vlm_filtered": 766
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_213",
+      "detections": 897,
+      "vlm_filtered": 754
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_214",
+      "detections": 944,
+      "vlm_filtered": 781
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_215",
+      "detections": 1104,
+      "vlm_filtered": 857
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_216",
+      "detections": 969,
+      "vlm_filtered": 824
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_217",
+      "detections": 908,
+      "vlm_filtered": 771
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_218",
+      "detections": 924,
+      "vlm_filtered": 767
+    },
+    {
+      "route": "route_24258",
+      "seed": "seed_219",
+      "detections": 902,
+      "vlm_filtered": 772
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_200",
+      "detections": 1715,
+      "vlm_filtered": 1281
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_201",
+      "detections": 1442,
+      "vlm_filtered": 1069
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_202",
+      "detections": 1620,
+      "vlm_filtered": 1225
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_203",
+      "detections": 1578,
+      "vlm_filtered": 1158
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_204",
+      "detections": 1661,
+      "vlm_filtered": 1221
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_205",
+      "detections": 1424,
+      "vlm_filtered": 1002
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_206",
+      "detections": 1454,
+      "vlm_filtered": 1045
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_207",
+      "detections": 1400,
+      "vlm_filtered": 1026
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_208",
+      "detections": 1568,
+      "vlm_filtered": 1110
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_209",
+      "detections": 1416,
+      "vlm_filtered": 1018
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_210",
+      "detections": 1521,
+      "vlm_filtered": 1098
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_211",
+      "detections": 1571,
+      "vlm_filtered": 1132
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_212",
+      "detections": 1267,
+      "vlm_filtered": 961
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_213",
+      "detections": 1635,
+      "vlm_filtered": 1140
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_214",
+      "detections": 1463,
+      "vlm_filtered": 1095
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_215",
+      "detections": 1805,
+      "vlm_filtered": 1267
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_216",
+      "detections": 1465,
+      "vlm_filtered": 1067
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_217",
+      "detections": 1551,
+      "vlm_filtered": 1119
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_218",
+      "detections": 1594,
+      "vlm_filtered": 1175
+    },
+    {
+      "route": "route_24759",
+      "seed": "seed_219",
+      "detections": 1649,
+      "vlm_filtered": 1193
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_200",
+      "detections": 1309,
+      "vlm_filtered": 1142
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_201",
+      "detections": 1048,
+      "vlm_filtered": 940
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_202",
+      "detections": 1154,
+      "vlm_filtered": 1016
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_203",
+      "detections": 1140,
+      "vlm_filtered": 1002
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_204",
+      "detections": 1076,
+      "vlm_filtered": 949
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_205",
+      "detections": 1176,
+      "vlm_filtered": 983
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_206",
+      "detections": 1008,
+      "vlm_filtered": 918
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_207",
+      "detections": 980,
+      "vlm_filtered": 872
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_208",
+      "detections": 1016,
+      "vlm_filtered": 941
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_209",
+      "detections": 1106,
+      "vlm_filtered": 976
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_210",
+      "detections": 1117,
+      "vlm_filtered": 994
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_211",
+      "detections": 1021,
+      "vlm_filtered": 900
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_212",
+      "detections": 1117,
+      "vlm_filtered": 998
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_213",
+      "detections": 1051,
+      "vlm_filtered": 968
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_214",
+      "detections": 1132,
+      "vlm_filtered": 1015
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_215",
+      "detections": 1032,
+      "vlm_filtered": 922
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_216",
+      "detections": 954,
+      "vlm_filtered": 870
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_217",
+      "detections": 1024,
+      "vlm_filtered": 963
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_218",
+      "detections": 972,
+      "vlm_filtered": 904
+    },
+    {
+      "route": "route_25857",
+      "seed": "seed_219",
+      "detections": 1085,
+      "vlm_filtered": 965
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_200",
+      "detections": 2900,
+      "vlm_filtered": 1887
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_201",
+      "detections": 3137,
+      "vlm_filtered": 1824
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_202",
+      "detections": 2590,
+      "vlm_filtered": 1826
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_203",
+      "detections": 3266,
+      "vlm_filtered": 1867
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_204",
+      "detections": 2851,
+      "vlm_filtered": 1878
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_205",
+      "detections": 2098,
+      "vlm_filtered": 1731
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_206",
+      "detections": 2277,
+      "vlm_filtered": 1767
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_207",
+      "detections": 2104,
+      "vlm_filtered": 1578
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_208",
+      "detections": 2496,
+      "vlm_filtered": 1735
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_209",
+      "detections": 2130,
+      "vlm_filtered": 1679
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_210",
+      "detections": 2788,
+      "vlm_filtered": 1920
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_211",
+      "detections": 2339,
+      "vlm_filtered": 1764
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_212",
+      "detections": 2092,
+      "vlm_filtered": 1613
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_213",
+      "detections": 2395,
+      "vlm_filtered": 1689
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_214",
+      "detections": 2145,
+      "vlm_filtered": 1602
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_215",
+      "detections": 2431,
+      "vlm_filtered": 1974
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_216",
+      "detections": 2547,
+      "vlm_filtered": 1784
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_217",
+      "detections": 2601,
+      "vlm_filtered": 1770
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_218",
+      "detections": 2434,
+      "vlm_filtered": 1690
+    },
+    {
+      "route": "route_25863",
+      "seed": "seed_219",
+      "detections": 2661,
+      "vlm_filtered": 1912
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_200",
+      "detections": 1114,
+      "vlm_filtered": 830
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_201",
+      "detections": 1032,
+      "vlm_filtered": 820
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_202",
+      "detections": 937,
+      "vlm_filtered": 678
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_203",
+      "detections": 1065,
+      "vlm_filtered": 783
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_204",
+      "detections": 1085,
+      "vlm_filtered": 804
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_205",
+      "detections": 1032,
+      "vlm_filtered": 779
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_206",
+      "detections": 894,
+      "vlm_filtered": 658
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_207",
+      "detections": 918,
+      "vlm_filtered": 694
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_208",
+      "detections": 1296,
+      "vlm_filtered": 949
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_209",
+      "detections": 1064,
+      "vlm_filtered": 803
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_210",
+      "detections": 1434,
+      "vlm_filtered": 969
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_211",
+      "detections": 1141,
+      "vlm_filtered": 829
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_212",
+      "detections": 907,
+      "vlm_filtered": 679
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_213",
+      "detections": 776,
+      "vlm_filtered": 548
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_214",
+      "detections": 1036,
+      "vlm_filtered": 760
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_215",
+      "detections": 1014,
+      "vlm_filtered": 795
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_216",
+      "detections": 1126,
+      "vlm_filtered": 753
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_217",
+      "detections": 1028,
+      "vlm_filtered": 796
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_218",
+      "detections": 825,
+      "vlm_filtered": 589
+    },
+    {
+      "route": "route_26408",
+      "seed": "seed_219",
+      "detections": 1104,
+      "vlm_filtered": 832
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_200",
+      "detections": 1171,
+      "vlm_filtered": 721
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_201",
+      "detections": 1607,
+      "vlm_filtered": 1005
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_202",
+      "detections": 1167,
+      "vlm_filtered": 716
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_203",
+      "detections": 1330,
+      "vlm_filtered": 788
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_204",
+      "detections": 1124,
+      "vlm_filtered": 697
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_205",
+      "detections": 1152,
+      "vlm_filtered": 739
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_206",
+      "detections": 1374,
+      "vlm_filtered": 835
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_207",
+      "detections": 1541,
+      "vlm_filtered": 967
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_208",
+      "detections": 1378,
+      "vlm_filtered": 764
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_209",
+      "detections": 1246,
+      "vlm_filtered": 749
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_210",
+      "detections": 1185,
+      "vlm_filtered": 741
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_211",
+      "detections": 1925,
+      "vlm_filtered": 1248
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_212",
+      "detections": 1323,
+      "vlm_filtered": 751
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_213",
+      "detections": 1159,
+      "vlm_filtered": 744
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_214",
+      "detections": 1122,
+      "vlm_filtered": 702
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_215",
+      "detections": 1126,
+      "vlm_filtered": 739
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_216",
+      "detections": 1701,
+      "vlm_filtered": 1137
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_217",
+      "detections": 1582,
+      "vlm_filtered": 1028
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_218",
+      "detections": 1129,
+      "vlm_filtered": 731
+    },
+    {
+      "route": "route_27494",
+      "seed": "seed_219",
+      "detections": 1289,
+      "vlm_filtered": 768
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_200",
+      "detections": 2839,
+      "vlm_filtered": 1115
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_201",
+      "detections": 2626,
+      "vlm_filtered": 1151
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_202",
+      "detections": 2930,
+      "vlm_filtered": 1176
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_203",
+      "detections": 2478,
+      "vlm_filtered": 1067
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_204",
+      "detections": 2526,
+      "vlm_filtered": 1167
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_205",
+      "detections": 1915,
+      "vlm_filtered": 935
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_206",
+      "detections": 2399,
+      "vlm_filtered": 1004
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_207",
+      "detections": 1587,
+      "vlm_filtered": 1028
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_208",
+      "detections": 2781,
+      "vlm_filtered": 1145
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_209",
+      "detections": 2287,
+      "vlm_filtered": 931
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_210",
+      "detections": 2350,
+      "vlm_filtered": 983
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_211",
+      "detections": 2495,
+      "vlm_filtered": 994
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_212",
+      "detections": 2398,
+      "vlm_filtered": 1028
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_213",
+      "detections": 2299,
+      "vlm_filtered": 1114
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_214",
+      "detections": 2254,
+      "vlm_filtered": 944
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_215",
+      "detections": 2344,
+      "vlm_filtered": 1196
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_216",
+      "detections": 2099,
+      "vlm_filtered": 951
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_217",
+      "detections": 2086,
+      "vlm_filtered": 1080
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_218",
+      "detections": 1857,
+      "vlm_filtered": 851
+    },
+    {
+      "route": "route_3100",
+      "seed": "seed_219",
+      "detections": 1929,
+      "vlm_filtered": 1016
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_200",
+      "detections": 671,
+      "vlm_filtered": 601
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_201",
+      "detections": 783,
+      "vlm_filtered": 678
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_202",
+      "detections": 580,
+      "vlm_filtered": 556
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_203",
+      "detections": 583,
+      "vlm_filtered": 528
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_204",
+      "detections": 730,
+      "vlm_filtered": 646
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_205",
+      "detections": 567,
+      "vlm_filtered": 524
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_206",
+      "detections": 544,
+      "vlm_filtered": 488
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_207",
+      "detections": 686,
+      "vlm_filtered": 622
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_208",
+      "detections": 518,
+      "vlm_filtered": 468
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_209",
+      "detections": 626,
+      "vlm_filtered": 576
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_210",
+      "detections": 466,
+      "vlm_filtered": 424
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_211",
+      "detections": 634,
+      "vlm_filtered": 581
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_212",
+      "detections": 633,
+      "vlm_filtered": 573
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_213",
+      "detections": 735,
+      "vlm_filtered": 632
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_214",
+      "detections": 669,
+      "vlm_filtered": 609
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_215",
+      "detections": 544,
+      "vlm_filtered": 492
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_216",
+      "detections": 631,
+      "vlm_filtered": 586
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_217",
+      "detections": 725,
+      "vlm_filtered": 652
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_218",
+      "detections": 506,
+      "vlm_filtered": 450
+    },
+    {
+      "route": "route_3472",
+      "seed": "seed_219",
+      "detections": 727,
+      "vlm_filtered": 638
+    }
+  ],
+  "missing": []
+}

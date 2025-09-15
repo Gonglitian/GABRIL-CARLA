@@ -66,30 +66,8 @@ class BridgeDataset(Dataset):
         self.augment = bool(augment)
         self.augment_next_obs_goal_differently = bool(augment_next_obs_goal_differently)
         self.apm = action_proprio_metadata or {}
-
-        # parse possible string inputs for augment kwargs
-        def _canon(v):
-            if isinstance(v, str):
-                s = v.strip()
-                if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
-                    try:
-                        return ast.literal_eval(s)
-                    except Exception:
-                        return v
-            return v
-        def _canon_dict(d):
-            if not isinstance(d, dict):
-                return d
-            out = {}
-            for k, v in d.items():
-                if isinstance(v, dict):
-                    out[k] = _canon_dict(v)
-                elif isinstance(v, list):
-                    out[k] = [_canon(x) for x in v]
-                else:
-                    out[k] = _canon(v)
-            return out
-        self.augment_kwargs = _canon_dict(augment_kwargs or {})
+        
+        self.augment_kwargs = augment_kwargs
         self._albu_cache: dict[tuple[int, int], A.ReplayCompose] = {}
 
         # Load all trajectories
@@ -140,7 +118,7 @@ class BridgeDataset(Dataset):
                 rrc = ak["random_resized_crop"]
                 scale = tuple(rrc.get("scale", [0.8, 1.0]))
                 ratio = tuple(rrc.get("ratio", [0.9, 1.1]))
-                ops.append(A.RandomResizedCrop(height=H, width=W, scale=scale, ratio=ratio, interpolation=cv2.INTER_LINEAR))
+                ops.append(A.RandomResizedCrop(size=(H, W), scale=scale, ratio=ratio, interpolation=cv2.INTER_LINEAR))
             elif op == "random_brightness" and ("random_brightness" in ak):
                 br = _to_pair(ak["random_brightness"], around1=True)
                 ops.append(A.ColorJitter(brightness=br, contrast=0, saturation=0, hue=0))

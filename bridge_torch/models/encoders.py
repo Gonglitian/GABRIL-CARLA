@@ -18,11 +18,16 @@ class ResNetV1Bridge(nn.Module):
             "resnet152": tvm.resnet152(weights=None),
         }[arch]
         # keep stem and layers; drop avgpool/fc
+        # print(f"base: {base}")
         self.stem = nn.Sequential(
             base.conv1, base.bn1, base.relu, base.maxpool,
             base.layer1, base.layer2, base.layer3, base.layer4,
         )
-
+        self.avgpool = base.avgpool
+        # dummy_input = torch.zeros(1, 3, 256, 256)
+        # dummy_output = self.stem(dummy_input)
+        # print(f"dummy_output: {dummy_output.shape}")
+        
         self._in_ch = None
         self.num_output_features = None
         
@@ -51,45 +56,12 @@ class ResNetV1Bridge(nn.Module):
                 new.weight.copy_(new_w)
             self.stem[0] = new.to(conv1.weight.device)
             self._in_ch = in_ch
-        
+            
+        self.output_features = self.forward(x).flatten(1).shape[1]
+        return self.output_features
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Ensure the input channel count is compatible with stem[0]
-        self.adapt_to_input_channels(x)
-        y = self.stem(x)
-        # Lazily set feature dimension for downstream MLP construction
-        # Flatten over all non-batch dimensions
-        try:
-            self._feat_dim = int(y.flatten(1).shape[1])
-        except Exception:
-            # Best-effort; leave unset if shape probing fails
-            pass
-        return y
-
-
-def build_encoder(name: str, **kwargs) -> nn.Module:
-    # TODO: clean this later, just for compatibility with eval.py
-    """Factory to build visual encoders.
-
-    Supported names (case-insensitive):
-    - "resnetv1-18-bridge", "resnetv1-34-bridge", "resnetv1-50-bridge",
-      "resnetv1-101-bridge", "resnetv1-152-bridge"
-    - "resnet18", "resnet34", "resnet50", "resnet101", "resnet152"
-
-    Extra kwargs are accepted for forward-compatibility and ignored here.
-    """
-    n = (name or "").lower()
-    arch = kwargs.get("arch")
-    if arch is None:
-        if "resnetv1-18" in n or n == "resnet18":
-            arch = "resnet18"
-        elif "resnetv1-34" in n or n == "resnet34" or n == "resnetv1-bridge":
-            arch = "resnet34"
-        elif "resnetv1-50" in n or n == "resnet50":
-            arch = "resnet50"
-        elif "resnetv1-101" in n or n == "resnet101":
-            arch = "resnet101"
-        elif "resnetv1-152" in n or n == "resnet152":
-            arch = "resnet152"
-        else:
-            arch = "resnet34"  # sensible default
-    return ResNetV1Bridge(arch=arch)
+        z = self.stem(x)
+        self.z_map = z
+        x = self.avgpool(z)
+        return x

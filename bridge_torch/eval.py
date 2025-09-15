@@ -8,6 +8,7 @@ import argparse
 from datetime import datetime
 from collections import deque
 from typing import Dict, Tuple, Optional
+from omegaconf import OmegaConf
 
 import numpy as np
 import torch
@@ -15,9 +16,9 @@ import cv2
 from PIL import Image
 import imageio
 
-
-from models.encoders import build_encoder
+from models.encoders import ResNetV1Bridge
 from agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC, GaussianPolicy
+from agents.state_bc import StateGaussianPolicy
 
 from experiments.widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
 from experiments.utils import state_to_eep, stack_obs
@@ -90,6 +91,8 @@ def _load_policy(save_dir: str, device: torch.device, im_size: int, ckpt_path: O
         cfg_path = os.path.join(save_dir, "config.json")
         with open(cfg_path, "r") as f:
             cfg = json.load(f)
+    
+        cfg = OmegaConf.create(cfg)
     # build agent/model
     agent, kind, obs_horizon, act_pred_horizon = _build_agent_from_config(cfg, device, im_size)
     # hydrate agent weights, stripping compiled prefixes like "_orig_mod."
@@ -134,66 +137,67 @@ def _discover_runs(root_dir: str) -> list:
     return runs
 
 
-def _build_agent_from_config(cfg: Dict, device: torch.device, im_size: int):
-    algo = "bc"
+def _build_agent_from_config(cfg, device: torch.device, im_size: int):
     # Robust encoder resolution with sensible defaults
-    enc_name = cfg.get("encoder", "resnetv1-34-bridge")
-    enc_kwargs = dict(cfg.get("encoder_kwargs", {})) if isinstance(cfg.get("encoder_kwargs", {}), dict) else {}
-    if "arch" not in enc_kwargs:
-        enc_kwargs.setdefault("pooling_method", "avg")
-        enc_kwargs.setdefault("add_spatial_coordinates", True)
-        enc_kwargs.setdefault("act", "swish")
-        enc_kwargs["arch"] = "resnet34"
-    enc = build_encoder(enc_name, **enc_kwargs).to(device)
+    enc = None
+    is_state_only = isinstance(cfg.algo.encoder, str) and cfg.algo.encoder.lower() == "none"
+    if not is_state_only:
+        enc = ResNetV1Bridge(arch=cfg.algo.encoder).to(device)
 
     # dummy shapes from dataset config
-    data_kwargs = cfg.get("data", {}) if isinstance(cfg.get("data", {}), dict) else {}
-    obs_horizon = int(data_kwargs.get("obs_horizon", 1))
-    act_pred_horizon = int(data_kwargs.get("act_pred_horizon", 1))
+    data_kwargs = cfg.algo.data
+    obs_horizon = int(data_kwargs.obs_horizon)
+    act_pred_horizon = int(data_kwargs.act_pred_horizon)
 
     # we will infer action_dim from bridgedata_config metadata
 
     # Warmup to set encoder feature dim (use im_size from args)
-    dummy_image = torch.zeros(1, 3 * obs_horizon, im_size, im_size, device=device)
-    _ = enc(dummy_image)
-    enc_feat = int(getattr(enc, "_feat_dim"))
+    enc_feat = 0
+    if enc is not None:
+        dummy_image = torch.zeros(1, 3 * obs_horizon, im_size, im_size, device=device)
+        enc_feat = enc.adapt_to_input_channels(dummy_image)
     # Use new schema under model
-    model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model", {}), dict) else {}
-    use_proprio = bool(model_cfg.get("use_proprio", False))
-    prop_dim = 0
-    if use_proprio:
-        prop_dim = 7  # conservative default; not heavily used at eval time
+    model_cfg = cfg.algo.model
+    use_proprio = True if is_state_only else model_cfg.use_proprio
+    prop_dim = 7 if use_proprio else 0
 
     # Only BC supported in refactor
     mlp = MLP_BC(
-        input_dim=enc_feat + prop_dim,
-        hidden_dims=tuple(model_cfg.get("hidden_dims", [256, 256, 256])),
-        dropout_rate=float(model_cfg.get("dropout_rate", 0.0)),
+        input_dim=(enc_feat + prop_dim) if not is_state_only else prop_dim,
+        hidden_dims=tuple(model_cfg.hidden_dims),
+        dropout_rate=float(model_cfg.dropout_rate),
     )
     policy_kwargs = {
-        "tanh_squash_distribution": bool(model_cfg.get("tanh_squash_distribution", False)),
-        "state_dependent_std": bool(model_cfg.get("state_dependent_std", False)),
-        "fixed_std": list(model_cfg.get("fixed_std", [])) or None,
-        "use_proprio": use_proprio,
+        "tanh_squash_distribution": model_cfg.tanh_squash_distribution,
+        "state_dependent_std": model_cfg.state_dependent_std,
+        "fixed_std": model_cfg.fixed_std or None,
+        "use_proprio": model_cfg.use_proprio,
     }
-    model = GaussianPolicy(
-        enc,
-        mlp,
-        action_dim=ACTION_DIM,
-        **policy_kwargs,
-    )
+    if is_state_only:
+        model = StateGaussianPolicy(
+            mlp,
+            action_dim=ACTION_DIM,
+            **policy_kwargs,
+        )
+    else:
+        model = GaussianPolicy(
+            enc,
+            mlp,
+            action_dim=ACTION_DIM,
+            **policy_kwargs,
+        )
     # Optimizer/scheduler/saliency with defaults if missing
-    opt_cfg = cfg.get("optimizer", {}) if isinstance(cfg.get("optimizer", {}), dict) else {}
-    sch_cfg = cfg.get("scheduler", {}) if isinstance(cfg.get("scheduler", {}), dict) else {}
-    sal_cfg = cfg.get("saliency", {}) if isinstance(cfg.get("saliency", {}), dict) else {}
+    opt_cfg = cfg.algo.optimizer
+    sch_cfg = cfg.algo.scheduler
+    sal_cfg = cfg.saliency
 
     agent = BCAgent(
         model=model,
         cfg=BCAgentConfig(
-            learning_rate=float(opt_cfg.get("lr", 3e-4)),
-            weight_decay=float(opt_cfg.get("weight_decay", 0.0)),
-            warmup_steps=int(sch_cfg.get("warmup_steps", 1000)),
-            decay_steps=int(sch_cfg.get("decay_steps", 1000000)),
+            learning_rate=float(opt_cfg.lr),
+            weight_decay=float(opt_cfg.weight_decay),
+            warmup_steps=int(sch_cfg.warmup_steps),
+            decay_steps=int(sch_cfg.decay_steps),
             scheduler=sch_cfg,
             saliency=sal_cfg,
         ),
@@ -306,12 +310,8 @@ def main():
 
     device = _prep_device(args.device)
 
-    # set up environment (once)
-    env_params = WidowXConfigs.DefaultEnvParams.copy()
-    env_params.update(ENV_PARAMS)
-    env_params["state_state"] = list(np.concatenate([args.initial_eep, [0, 0, 0, 1]]))
-    widowx_client = WidowXClient(host=args.ip, port=args.port)
-    widowx_client.init(env_params, image_size=args.im_size)
+    # Initialize WidowX client placeholder
+    widowx_client = None
 
     # Outer workflow loop to support runtime reset with 'R'
     while True:
@@ -333,9 +333,18 @@ def main():
             selected = 0
         else:
             if args.policy_index is not None:
-                selected = int(args.policy_index)
-                if selected < 0 or selected >= len(names):
-                    raise ValueError(f"policy_index out of range: got {selected}, available [0..{len(names)-1}]")
+                # For automated runs, only use policy_index on first iteration
+                if 'first_run' not in locals():
+                    selected = int(args.policy_index)
+                    if selected < 0 or selected >= len(names):
+                        raise ValueError(f"policy_index out of range: got {selected}, available [0..{len(names)-1}]")
+                    first_run = False
+                else:
+                    # On subsequent runs, always prompt for user selection
+                    print("policies:")
+                    for i, n in enumerate(names):
+                        print(f"{i}) {n}")
+                    selected = int(input("select policy: "))
             else:
                 print("policies:")
                 for i, n in enumerate(names):
@@ -363,7 +372,19 @@ def main():
             chosen_ckpt = ckpt_files[ckpt_idx]
 
         # Load the selected policy with the chosen ckpt
+        print(f"Loading policy from {chosen_run} with checkpoint {os.path.basename(chosen_ckpt)}...")
         picked = _load_policy(chosen_run, device, args.im_size, ckpt_path=chosen_ckpt)
+        print(f"Successfully loaded policy: {picked['name']}")
+
+        # Connect to WidowX server after model is loaded (only on first run or if not connected)
+        if widowx_client is None:
+            print("Initializing WidowX connection...")
+            env_params = WidowXConfigs.DefaultEnvParams.copy()
+            env_params.update(ENV_PARAMS)
+            env_params["state_state"] = list(np.concatenate([args.initial_eep, [0, 0, 0, 1]]))
+            widowx_client = WidowXClient(host=args.ip, port=args.port)
+            widowx_client.init(env_params, image_size=args.im_size)
+            print("WidowX connection established successfully.")
 
         # build get_action wrapper for picked policy
         get_action = _build_get_action(
@@ -526,9 +547,18 @@ def main():
                 imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
             else:
                 imageio.mimsave(save_path, images, fps=1.0 / STEP_DURATION * 3)
+            print(f"Video saved to: {save_path}")
 
-        # exit after one run unless user requested reset
-        break
+        # Ask user if they want to test another policy
+        try:
+            continue_choice = input("\nTest completed. Load another policy? [y/n] (default: y): ").strip().lower()
+            if continue_choice in ('n', 'no'):
+                print("Exiting...")
+                break
+            # Otherwise continue to policy selection
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting...")
+            break
 
 
 if __name__ == "__main__":

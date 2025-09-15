@@ -82,14 +82,7 @@ dataloader:
   persistent_workers: true
   pin_memory: true
 
-
-# Scheduler selector consumed inside agents
-# - type: constant | warmup_cosine
-scheduler:
-  type: warmup_cosine
-  # Default total decay horizon ties to total num_steps unless overridden by algo/bc.yaml
-  decay_steps: ${num_steps}
-
+  
 # WandB project (set wandb.enabled=false to disable fully)
 wandb:
   project: bridgedata_torch

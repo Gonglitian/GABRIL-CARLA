@@ -8,25 +8,41 @@ import torch.nn as nn
 import torch.nn.functional as F
 from common.gaze import get_gaze_mask
 
-class MLP(nn.Module):
-    def __init__(self, input_dim: int, hidden_dims=(256, 256, 256), dropout_rate=0.0, activate_final=True):
+import torch
+import torch.nn as nn
+
+class MLP(nn.Module): 
+    def __init__(self, input_dim: int, hidden_dims=(256, 256, 256), dropout_rate=0.0, activate_final=True): 
         super().__init__()
         layers = []
         last = input_dim
-        for h in hidden_dims:
-            layers += [nn.Linear(last, h), nn.ReLU(inplace=True)]
+        for i, h in enumerate(hidden_dims):
+            # 线性层
+            layers.append(nn.Linear(last, h))
+            # LayerNorm
+            layers.append(nn.LayerNorm(h))
+            # 激活
+            layers.append(nn.ReLU(inplace=True))
+            # Dropout（如果需要）
             if dropout_rate and dropout_rate > 0:
-                layers += [nn.Dropout(dropout_rate)]
+                layers.append(nn.Dropout(dropout_rate))
             last = h
+
         if activate_final:
             self.net = nn.Sequential(*layers)
             self.out_dim = last
         else:
-            self.net = nn.Sequential(*layers[:-1])
-            self.out_dim = layers[-2].out_features if layers else input_dim
+            # 去掉最后的 ReLU（以及可能的 Dropout）
+            # 注意：如果要保留最后一层 Linear+Norm，而去掉激活，就删掉最后两层
+            if dropout_rate and dropout_rate > 0:
+                self.net = nn.Sequential(*layers[:-2])  # 去掉 ReLU + Dropout
+            else:
+                self.net = nn.Sequential(*layers[:-1])  # 去掉 ReLU
+            self.out_dim = last
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
 
 
 class GaussianPolicy(nn.Module):
@@ -58,8 +74,8 @@ class GaussianPolicy(nn.Module):
 
     def forward(self, obs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         x = obs["image"]  # (B, C, H, W)
-        z_map: torch.Tensor = self.encoder(x)
-        z = z_map.flatten(1)
+        z_pool = self.encoder(x)
+        z = z_pool.flatten(1)
         if self.use_proprio and ("proprio" in obs):
             prop = obs["proprio"]
             if prop.dim() > 2:
@@ -71,7 +87,7 @@ class GaussianPolicy(nn.Module):
             std = torch.exp(self.log_std(h)).clamp(min=1e-4, max=10.0)
         else:
             std = self.fixed_std.expand_as(mu)
-        return {"mu": mu, "std": std, "z_map": z_map}
+        return {"mu": mu, "std": std, "z_map": self.encoder.z_map}
 
     def dist(self, out: Dict[str, torch.Tensor]):
         mu, std = out["mu"], out["std"]
@@ -99,7 +115,8 @@ class BCAgent:
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
         # Scheduler selectable via config.scheduler.type
         self.scheduler = None
-        sched_type = getattr(cfg, "scheduler", {}).get("type", "warmup_cosine")
+        print(f"cfg.scheduler: {cfg.scheduler}")
+        sched_type = cfg.scheduler["type"]
         if sched_type == "constant":
             self.scheduler = None
         else:
@@ -116,15 +133,9 @@ class BCAgent:
         self.step = 0
 
         # Saliency-variant config (optional, from YAML)
-        sal_cfg = {}
-        direct = getattr(cfg, "saliency", {}) or {}
-        if hasattr(direct, "to_dict"):
-            sal_cfg = direct.to_dict()
-        elif isinstance(direct, dict):
-            sal_cfg = dict(direct)
-        self._saliency_enabled = (str(sal_cfg.get("enabled", False)).strip().lower() in {"1", "true", "t", "yes", "y", "on"})
-        self._saliency_weight = float(sal_cfg.get("weight", 1.0))
-        self._saliency_beta = float(sal_cfg.get("beta", 1.0))
+        self._saliency_enabled = cfg.saliency.enabled
+        self._saliency_weight = cfg.saliency.weight
+        self._saliency_beta = cfg.saliency.beta
             
     def update(self, batch: Dict[str, torch.Tensor]):
         self.model.train()
@@ -145,6 +156,8 @@ class BCAgent:
         actor_loss = -log_prob.mean()
         reg_loss = torch.tensor(0.0, device=self.device)
         # Saliency regularization (Reg variant)
+        # print(f"self._saliency_enabled: {self._saliency_enabled}")
+        # print(f"obs: {obs.keys()}")
         if self._saliency_enabled and ("saliency" in obs):
             z_map = out["z_map"]  # (B,C,Hf,Wf)
             # print(f"z_map.shape: {z_map.shape}")

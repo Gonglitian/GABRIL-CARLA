@@ -15,6 +15,7 @@ from torch.amp import autocast, GradScaler
 
 from models.encoders import ResNetV1Bridge
 from agents.bc import BCAgent, BCAgentConfig, MLP as MLP_BC, GaussianPolicy
+from agents.state_bc import StateGaussianPolicy
 from data.bridge_numpy import build_bridge_dataset, make_dataloader
 from torch.utils.data.distributed import DistributedSampler
 from common.wandb import WandBLogger
@@ -71,7 +72,7 @@ def main(cfg: DictConfig) -> None:
     # Basic logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    device = _prep_device(str(getattr(cfg, "device", "cuda")))
+    device = _prep_device(cfg.device)
 
     # Enable backend accelerations
     torch.backends.cudnn.benchmark = True
@@ -99,8 +100,8 @@ def main(cfg: DictConfig) -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     # init (optional) DDP
-    ddp_cfg = getattr(cfg, "ddp", {}) or {}
-    ddp_enabled = bool(ddp_cfg.get("enabled", False))
+    ddp_cfg = cfg.ddp
+    ddp_enabled = ddp_cfg.enabled
     ddp_active, rank, world_size, local_rank = _ddp_init_if_needed(device)
     if ddp_enabled and not ddp_active and torch.cuda.device_count() > 1:
         logging.warning("DDP enabled in config but process not launched with torchrun. Proceeding single-process.")
@@ -109,37 +110,42 @@ def main(cfg: DictConfig) -> None:
     wandb_logger = None
     save_root: str | None = None
     if is_main_process():
-        wb_cfg = getattr(cfg, "wandb", {}) or {}
-        wb_enabled = bool(wb_cfg.get("enabled", True)) if isinstance(wb_cfg, dict) else True
-        project_name = wb_cfg.get("project", "bridgedata_torch") if isinstance(wb_cfg, dict) else "bridgedata_torch"
+        wb_cfg = cfg.wandb
+        wb_enabled = wb_cfg.enabled
+        project_name = wb_cfg.project
         
         # Auto-generate experiment descriptor based on configuration parameters
         def generate_exp_descriptor(cfg):
             parts = []
             # Get task name
-            parts.append(cfg["bridgedata"]["task_name"])
+            parts.append(cfg.bridgedata.task_name)
             
             # Proprioception usage
-            use_proprio = cfg["algo"]["model"]["use_proprio"]
+            use_proprio = cfg.algo.model.use_proprio
             if use_proprio:
-                parts.append("proprio")
+                if cfg.algo.encoder == "none":
+                    parts.append("only_proprio")
+                else:
+                    parts.append("proprio")
             # Observation horizon
-            obs_horizon = cfg["algo"]["data"]["obs_horizon"]
+            obs_horizon = cfg.algo.data.obs_horizon
             parts.append(f"s{obs_horizon}")
             # Saliency configuration
-            saliency_enabled = cfg["saliency"]["enabled"]
-            if saliency_enabled:
-                parts.append("saliency")
-            else:
-                parts.append("no_saliency")
+            saliency_enabled = cfg.saliency.enabled
+            
+            if cfg.algo.encoder != "none":
+                if saliency_enabled:
+                    parts.append("saliency")
+                else:
+                    parts.append("no_saliency")
 
             # Encoder architecture
-            parts.append(cfg["algo"]["encoder"])
+            parts.append(cfg.algo.encoder)
             
             return "_".join(parts)
         
         # Use custom name if provided, otherwise auto-generate
-        custom_name = str(getattr(cfg, "name", "")).strip()
+        custom_name = str(cfg.name).strip()
         if custom_name:
             exp_descriptor = custom_name
         else:
@@ -149,7 +155,7 @@ def main(cfg: DictConfig) -> None:
         cfg_plain = OmegaConf.to_container(cfg, resolve=True)
         wandb_config.update({"project": project_name, "exp_descriptor": exp_descriptor})
         if wb_enabled:
-            wandb_logger = WandBLogger(wandb_config=wandb_config, variant=cfg_plain, debug=bool(getattr(cfg, "debug", False)))
+            wandb_logger = WandBLogger(wandb_config=wandb_config, variant=cfg_plain, debug=cfg.debug)
         else:
             wandb_logger = None
 
@@ -172,16 +178,16 @@ def main(cfg: DictConfig) -> None:
     val_seed = int(cfg.seed)
 
     per_rank_bs = int(cfg.batch_size // (world_size if ddp_active else 1))
-    per_rank_val_bs = int(getattr(cfg, "val_batch_size", cfg.batch_size) // (world_size if ddp_active else 1))
+    per_rank_val_bs = int(cfg.val_batch_size // (world_size if ddp_active else 1))
     per_rank_bs = max(per_rank_bs, 1)
     per_rank_val_bs = max(per_rank_val_bs, 1)
 
     bdcfg = cfg.bridgedata
     # Build torch-style datasets
-    data_cfg = getattr(cfg, "data", {}) or {}
+    data_cfg = cfg.algo.data
     data_kwargs = OmegaConf.to_container(data_cfg, resolve=True) if isinstance(data_cfg, DictConfig) else dict(data_cfg)
     # inject saliency.alpha
-    if "saliency" in cfg and hasattr(cfg.saliency, "alpha"):
+    if cfg.saliency and cfg.saliency.alpha:
         data_kwargs.setdefault("saliency_alpha", float(cfg.saliency.alpha))
 
     train_ds = build_bridge_dataset(
@@ -202,8 +208,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     # DataLoaders
-    dl_cfg = getattr(cfg, "dataloader", {})
-    dl_kwargs = OmegaConf.to_container(dl_cfg, resolve=True) if isinstance(dl_cfg, DictConfig) else (dl_cfg.to_dict() if hasattr(dl_cfg, "to_dict") else dict(dl_cfg))
+    dl_cfg = cfg.dataloader
+    dl_kwargs = OmegaConf.to_container(dl_cfg, resolve=True) if isinstance(dl_cfg, DictConfig) else dict(dl_cfg)
     train_sampler = None
     val_sampler = None
     if ddp_enabled and ddp_active:
@@ -214,102 +220,111 @@ def main(cfg: DictConfig) -> None:
 
     # Peek one batch to infer shapes
     warmup_batch = next(iter(train_loader))
-    obs_img = warmup_batch["observations"]["image"]
-    obs_shape = obs_img.shape
+    obs_img = warmup_batch["observations"].get("image")
+    obs_shape = obs_img.shape if obs_img is not None else None
     action_dim = int(warmup_batch["actions"].shape[-1])
     goal_img = warmup_batch.get("goals", {}).get("image") if isinstance(warmup_batch.get("goals"), dict) else None
     goal_shape = goal_img.shape if goal_img is not None else None
     if is_main_process():
         logging.info("Obs batch shape: %s, action_dim: %s, goal shape: %s", obs_shape, action_dim, goal_shape)
 
-    # Build encoder — 容错读取（若未从 algo 预设合成成功则回退到默认）
-    enc_name = cfg["algo"]["encoder"]
-    # print(f"enc_name: {enc_name}")
-    enc = ResNetV1Bridge(arch=enc_name).to(device)
+    # Build encoder if needed (state_bc 无需 encoder)
+    enc = None
+    enc_name = cfg.algo.encoder
+    if isinstance(enc_name, str) and enc_name.lower() != "none":
+        enc = ResNetV1Bridge(arch=enc_name).to(device)
 
     # torch.compile on encoder if enabled (and not DDP-active)
-    compile_enabled = getattr(cfg, "compile", {}).get("enabled", False)
-    compile_kwargs = getattr(cfg, "compile", {}).get("kwargs", {})
-    if compile_enabled and hasattr(torch, 'compile') and not (ddp_enabled and ddp_active):
-        enc = torch.compile(enc, **compile_kwargs)
-        if is_main_process():
-            logging.info("Encoder compiled with torch.compile")
-    elif compile_enabled and (ddp_enabled and ddp_active) and is_main_process():
-        logging.info("DDP active: skip compiling encoder; will compile full model instead")
+    compile_enabled = cfg.compile.enabled
+    compile_kwargs = cfg.compile.kwargs
+    if enc is not None:
+        if compile_enabled and hasattr(torch, 'compile') and not (ddp_enabled and ddp_active):
+            enc = torch.compile(enc, **compile_kwargs)
+            if is_main_process():
+                logging.info("Encoder compiled with torch.compile")
+        elif compile_enabled and (ddp_enabled and ddp_active) and is_main_process():
+            logging.info("DDP active: skip compiling encoder; will compile full model instead")
 
     # Warm-up forward to initialize lazy shapes (use channels_last for conv perf)
-    _warm = warmup_batch["observations"]["image"].to(device)
-    if _warm.dim() == 4:
-        _warm = _warm.contiguous(memory_format=torch.channels_last)
-    _ = enc.adapt_to_input_channels(_warm)
-    enc_feat = enc.num_output_features
+    enc_feat = 0
+    if enc is not None and obs_img is not None:
+        _warm = warmup_batch["observations"]["image"].to(device)
+        if _warm.dim() == 4:
+            _warm = _warm.contiguous(memory_format=torch.channels_last)
+        enc_feat = enc.adapt_to_input_channels(_warm)
     # Model/policy configuration (flattened Hydra schema)
-    model_cfg_obj = cfg.get("model", {}) if isinstance(cfg, DictConfig) else getattr(cfg, "model", {})
-    model_cfg = OmegaConf.to_container(model_cfg_obj, resolve=True) if isinstance(model_cfg_obj, DictConfig) else (dict(model_cfg_obj) if isinstance(model_cfg_obj, dict) else {})
+    # model_cfg_obj = cfg.get("model", {}) if isinstance(cfg, DictConfig) else getattr(cfg, "model", {})
+    # model_cfg = OmegaConf.to_container(model_cfg_obj, resolve=True) if isinstance(model_cfg_obj, DictConfig) else (dict(model_cfg_obj) if isinstance(model_cfg_obj, dict) else {})
+    model_cfg = cfg.algo.model
+    use_proprio_flag = bool(getattr(model_cfg, "use_proprio", False))
+    # state_bc 场景强制使用 proprio
+    if isinstance(enc_name, str) and enc_name.lower() == "none":
+        use_proprio_flag = True
+    prop_dim = int(warmup_batch["observations"]["proprio"].shape[1]) if ("proprio" in warmup_batch["observations"]) else 0
+    # print(f"warmup_batch['observations']: {warmup_batch['observations'].keys()}")
+    # print(f"model_cfg: {model_cfg}")
 
-    prop_dim = 0
-    if bool(model_cfg.get("use_proprio", False)) and ("proprio" in warmup_batch["observations"]):
-        prop_dim = int(warmup_batch["observations"]["proprio"].shape[1])
-
-    # 解析顶层 saliency 配置
-    def _resolve_saliency(dc: DictConfig) -> dict:
-        if hasattr(dc, "saliency") and dc.saliency is not None:
-            s = OmegaConf.to_container(dc.saliency, resolve=True)
-            return {
-                "enabled": bool(s.get("enabled", False)),
-                "weight": float(s.get("weight", 0.0)),
-                "beta": float(s.get("beta", 1.0)),
-            }
-        return {"enabled": False, "weight": 0.0, "beta": 1.0}
-
-    sal_cfg = _resolve_saliency(cfg)
-
-    # Build BC agent/model3
-    mlp = MLP_BC(input_dim=enc_feat + prop_dim, hidden_dims=tuple(model_cfg.get("hidden_dims", [256,256,256])), dropout_rate=float(model_cfg.get("dropout_rate", 0.0)))
+    sal_cfg = cfg.saliency
+    # Build BC agent/model
+    print(f"enc_feat: {enc_feat}, prop_dim: {prop_dim}")
+    mlp = MLP_BC(input_dim=(enc_feat + prop_dim) if (enc is not None) else prop_dim,
+                 hidden_dims=tuple(model_cfg.hidden_dims), dropout_rate=float(model_cfg.dropout_rate))
     policy_kwargs = {
-        "tanh_squash_distribution": bool(model_cfg.get("tanh_squash_distribution", False)),
-        "state_dependent_std": bool(model_cfg.get("state_dependent_std", False)),
-        "fixed_std": list(model_cfg.get("fixed_std", [])) or None,
-        "use_proprio": bool(model_cfg.get("use_proprio", False)),
+        "tanh_squash_distribution": bool(model_cfg.tanh_squash_distribution),
+        "state_dependent_std": bool(model_cfg.state_dependent_std),
+        "fixed_std": list(model_cfg.fixed_std) or None,
+        "use_proprio": use_proprio_flag,
     }
     agent_cfg = BCAgentConfig(
-        learning_rate=float(getattr(cfg, "optimizer", {}).get("lr", 3e-4) if isinstance(getattr(cfg, "optimizer", {}), dict) else 3e-4),
-        weight_decay=float(getattr(cfg, "optimizer", {}).get("weight_decay", 0.0) if isinstance(getattr(cfg, "optimizer", {}), dict) else 0.0),
-        warmup_steps=int(getattr(cfg, "scheduler", {}).get("warmup_steps", 1000) if isinstance(getattr(cfg, "scheduler", {}), dict) else 1000),
-        decay_steps=int(getattr(cfg, "scheduler", {}).get("decay_steps", getattr(cfg, "num_steps", 1000000)) if isinstance(getattr(cfg, "scheduler", {}), dict) else int(getattr(cfg, "num_steps", 1000000))),
-        scheduler=OmegaConf.to_container(getattr(cfg, "scheduler", {}), resolve=True) if isinstance(getattr(cfg, "scheduler", {}), DictConfig) else (getattr(cfg, "scheduler", {}) if isinstance(getattr(cfg, "scheduler", {}), dict) else {}),
-        saliency=sal_cfg or {},
+        learning_rate=cfg.algo.optimizer.lr,
+        weight_decay=cfg.algo.optimizer.weight_decay,
+        warmup_steps=0.1*cfg.num_steps,
+        decay_steps=cfg.num_steps, 
+        scheduler=cfg.algo.scheduler,
+        saliency=sal_cfg,
     )
-    agent = BCAgent(
-        model=GaussianPolicy(
-            enc, mlp, action_dim=action_dim, **policy_kwargs
-        ),
-        cfg=agent_cfg,
-        action_dim=action_dim,
-        device=device,
-    )
+    # 根据是否有 encoder 选择视觉/状态策略
+    if enc is None:
+        agent = BCAgent(
+            model=StateGaussianPolicy(
+                mlp, action_dim=action_dim, tanh_squash_distribution=policy_kwargs["tanh_squash_distribution"],
+                state_dependent_std=policy_kwargs["state_dependent_std"], fixed_std=policy_kwargs["fixed_std"],
+            ),
+            cfg=agent_cfg,
+            action_dim=action_dim,
+            device=device,
+        )
+    else:
+        agent = BCAgent(
+            model=GaussianPolicy(
+                enc, mlp, action_dim=action_dim, **policy_kwargs
+            ),
+            cfg=agent_cfg,
+            action_dim=action_dim,
+            device=device,
+        )
 
     # DDP wrap for full model if enabled
     if ddp_enabled and ddp_active:
         agent.model = DDP(
             agent.model,
             device_ids=[local_rank] if device.type == "cuda" else None,
-            find_unused_parameters=bool(getattr(cfg, "ddp", {}).get("find_unused_parameters", False)),
+            find_unused_parameters=bool(cfg.ddp.find_unused_parameters),
         )
 
     # AMP
-    amp_cfg = getattr(cfg, "amp", {}) or {}
-    amp_enabled = bool(amp_cfg.get("enabled", False))
-    amp_dtype_name = str(amp_cfg.get("dtype", "bf16")).lower()
+    amp_cfg = cfg.amp
+    amp_enabled = bool(amp_cfg.enabled)
+    amp_dtype_name = str(amp_cfg.dtype).lower()
     amp_dtype = torch.bfloat16 if amp_dtype_name in {"bf16", "bfloat16"} else torch.float16
     scaler = None
     if amp_enabled and device.type == "cuda":
         if amp_dtype is torch.float16:
             scaler = GradScaler(
                 enabled=True,
-                growth_factor=float(amp_cfg.get("growth_factor", 2.0)),
-                backoff_factor=float(amp_cfg.get("backoff_factor", 0.5)),
-                growth_interval=int(amp_cfg.get("growth_interval", 2000)),
+                growth_factor=float(amp_cfg.growth_factor),
+                backoff_factor=float(amp_cfg.backoff_factor),
+                growth_interval=int(amp_cfg.growth_interval),
             )
             if is_main_process():
                 logging.info("AMP FP16 enabled with GradScaler")
@@ -320,11 +335,11 @@ def main(cfg: DictConfig) -> None:
     elif amp_enabled and device.type != "cuda" and is_main_process():
         logging.warning("AMP requested but CUDA not available; running in FP32")
 
-    # Optionally resume
-    if getattr(cfg, "resume_path", None):
-        ckpt = torch.load(str(cfg.resume_path), map_location=device)
-        model_to_load = agent.model.module if isinstance(agent.model, DDP) else agent.model
-        model_to_load.load_state_dict(ckpt["model"])  # type: ignore
+    # Todo: Optionally resume
+    # if cfg.resume_path:
+    #     ckpt = torch.load(str(cfg.resume_path), map_location=device)
+    #     model_to_load = agent.model.module if isinstance(agent.model, DDP) else agent.model
+    #     model_to_load.load_state_dict(ckpt["model"])  # type: ignore
 
     train_iter = iter(train_loader)
 
@@ -357,7 +372,7 @@ def main(cfg: DictConfig) -> None:
                     wandb_logger.log({"training": info}, step=step + 1)
 
             if (step + 1) % int(cfg.eval_interval) == 0 and is_main_process():
-                eval_batches_config = getattr(cfg, "eval_batches", None)
+                eval_batches_config = cfg.eval_batches
                 if eval_batches_config is None:
                     logging.info("[eval %d] Skipped - eval_batches set to null", step + 1)
                 else:
